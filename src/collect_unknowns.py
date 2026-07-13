@@ -93,3 +93,41 @@ def detect_matches(app, known: dict, frame: np.ndarray) -> list[dict]:
             }
         )
     return faces
+
+
+def process_frame(
+    app,
+    known: dict,
+    frame: np.ndarray,
+    ts: float,
+    clusters: list[dict],
+    *,
+    cluster_sim: float = 0.5,
+) -> list[dict]:
+    """Detect + match every face in one frame and greedily assign each into `clusters`
+    (in place, the same machinery `collect()` uses per sampled frame). Returns
+    `detect_matches`' face list, enough for a caller to draw recognition boxes (or feed a
+    tracker) without a second detection pass. Pure w.r.t. display: the live view uses this to
+    both accumulate clusters and draw, so a live pass and a batch scan build identical
+    clusters."""
+    faces = detect_matches(app, known, frame)
+    for f in faces:
+        x1, y1, x2, y2 = f["bbox"]
+        obs = {
+            "t": round(ts, 2),
+            "bbox": [x1, y1, x2, y2],
+            "sims": {p: round(s, 4) for p, s in f["sims"].items()},
+        }
+        q = _quality(f["det_score"], f["face_px"])
+        _assign(
+            clusters,
+            f["emb"],
+            f["sim"],
+            f["person"],
+            ts,
+            q,
+            _crop(frame, (x1, y1, x2, y2)),
+            cluster_sim,
+            obs=obs,
+        )
+    return faces

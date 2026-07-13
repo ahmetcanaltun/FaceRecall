@@ -131,3 +131,219 @@ def process_frame(
             obs=obs,
         )
     return faces
+
+
+def finalize(clusters: list[dict], known: dict, threshold: float) -> dict:
+    """Apply the adopted per-cluster decision (candidate / peak / 3-of-5 temporal score ->
+    recognized) to already-clustered detections, sort unknowns-first, and return
+    {recognized, unknown}. Split out of `collect()` so a live pass (which builds `clusters`
+    incrementally via `process_frame`) can reach the same decision on Stop."""
+    for c in clusters:  # the adopted per-cluster decision (3-of-5 temporal rule)
+        cand = max(known, key=lambda p: max(o["sims"][p] for o in c["obs"]))
+        series = [o["sims"][cand] for o in c["obs"]]
+        c["candidate"], c["peak_sim"] = cand, max(series)
+        c["temporal_sim"] = temporal_score(series)
+        c["recognized"] = c["temporal_sim"] is not None and c["temporal_sim"] >= threshold
+    n_reco = sum(c["recognized"] for c in clusters)
+    clusters.sort(key=lambda c: (c["recognized"], c["first_t"]))  # unknowns first
+    return {"recognized": n_reco, "unknown": len(clusters) - n_reco}
+
+
+def collect(
+    app,
+    known: dict,
+    video,
+    *,
+    threshold: float = G.DEFAULT_THRESHOLD,
+    cluster_sim: float = 0.5,
+    interval: float = 0.4,
+    progress=None,
+) -> tuple[list[dict], dict]:
+    """Make one sampled pass over `video`, matching every face against the `known` gallery
+    ({person: (N,512)}) and grouping all faces (recognized and not) into per-person clusters
+    by embedding similarity, one entry per apparent person. Returns (clusters, stats):
+      * clusters: each {rep_emb, rep_sim, rep_closest, rep_quality, crop(ndarray), n,
+                   first_t, last_t, obs, candidate, peak_sim, temporal_sim, recognized}.
+                   `obs` is the full per-observation score series
+                   [{t, bbox, sims: {person: cosine}}, ...] in time order; `candidate` is the
+                   gallery person the cluster is closest to at its best moment, `peak_sim`
+                   that best single-observation cosine, `temporal_sim` the aggregated
+                   TEMPORAL_K-of-TEMPORAL_N score (None if the cluster is too brief), and
+                   `recognized` the adopted per-cluster decision:
+                   temporal_sim >= threshold (the 3-of-5 rule, a single hot frame no
+                   longer decides). rep_* fields describe the
+                   highest-quality detection (whose crop is saved) and are kept for
+                   display/enrollment. Sorted unknown-first, then by first appearance.
+      * stats: {sampled, detections, recognized, unknown}.
+    Pure (no disk writes) so both the CLI and the Streamlit app can call it. `progress(frac,
+    text)` is called periodically if given, so a UI can show a bar.
+    """
+    cap = cv2.VideoCapture(str(video))
+    if not cap.isOpened():
+        raise RuntimeError(f"Could not open {video!r}")
+    fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
+    total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
+    step = max(1, int(round(fps * interval)))
+
+    clusters: list[dict] = []
+    n_det = sampled = idx = 0
+    while True:
+        if not cap.grab():
+            break
+        if idx % step == 0:
+            ok, frame = cap.retrieve()
+            if ok:
+                sampled += 1
+                faces = process_frame(
+                    app, known, frame, idx / fps, clusters, cluster_sim=cluster_sim
+                )
+                n_det += len(faces)
+                if progress and total:
+                    progress(min(idx / total, 1.0), f"scanned {sampled} frames")
+        idx += 1
+    cap.release()
+    if progress:
+        progress(1.0, f"scanned {sampled} frames")
+    stats = finalize(clusters, known, threshold)
+    return clusters, {"sampled": sampled, "detections": n_det, **stats}
+
+
+# Adopted decision rule (chosen from a 16-rule sweep, experiments/temporal_aggregation.py,
+# user sign-off 2026-07-13): a cluster is recognized iff >=K of some N consecutive
+# observations score >= threshold.
+# At the ~0.4 s sampling interval that is a ~2 s window and requires ~1.2 s of presence,
+# a single hot frame can no longer flip the decision in either direction.
+TEMPORAL_K, TEMPORAL_N = 3, 5
+
+
+def temporal_score(series: list[float], k: int = TEMPORAL_K, n: int = TEMPORAL_N) -> float | None:
+    """Aggregated score under the k-of-n rule: the best value v such that some window of
+    <=n consecutive observations has >=k observations >= v (= max over windows of the k-th
+    largest value in the window). None if the series is shorter than k, too brief to ever
+    pass. Compare the result against the recognition threshold."""
+    m = len(series)
+    if m < k:
+        return None
+    windows = [series] if m <= n else [series[i : i + n] for i in range(m - n + 1)]
+    return max(sorted(w, reverse=True)[k - 1] for w in windows)
+
+
+# ---------------------------------------------------------------------------
+# ignore list, persists across re-scans (in results/unknowns/<video_id>/ignored.json),
+# so a face the user ignored once isn't asked about again on the next scan.
+# ---------------------------------------------------------------------------
+def _ignored_path(out_dir) -> Path:
+    return Path(out_dir) / "ignored.json"
+
+
+def load_ignored(out_dir) -> list[np.ndarray]:
+    p = _ignored_path(out_dir)
+    if not p.exists():
+        return []
+    return [np.asarray(e, dtype=np.float32) for e in json.loads(p.read_text()).get("embs", [])]
+
+
+def add_ignored(out_dir, emb) -> None:
+    """Remember one ignored face's embedding (unit-norm) so future scans auto-skip it."""
+    p = _ignored_path(out_dir)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    data = json.loads(p.read_text()) if p.exists() else {"embs": []}
+    data["embs"].append([round(float(v), 6) for v in emb])
+    p.write_text(json.dumps(data))
+
+
+def clear_ignored(out_dir) -> int:
+    """Forget all ignored faces for this video. Returns how many were forgotten."""
+    p = _ignored_path(out_dir)
+    n = len(load_ignored(out_dir))
+    if p.exists():
+        p.unlink()
+    return n
+
+
+def write_manifest(
+    clusters: list[dict], video, *, threshold: float, cluster_sim: float, out_root: str
+) -> Path:
+    """Persist `collect()`'s output as results/unknowns/<video_id>/{manifest.json, crop_*.jpg},
+    the handoff the review UI reads. Returns the manifest path."""
+    video_id = Path(video).stem
+    out_dir = Path(out_root) / video_id
+    out_dir.mkdir(parents=True, exist_ok=True)
+    entries = []
+    for i, c in enumerate(clusters):
+        crop_name = f"crop_{i:03d}.jpg"
+        cv2.imwrite(str(out_dir / crop_name), c["crop"])
+        recognized = bool(c["recognized"])
+        entries.append(
+            {
+                "id": i,
+                "crop": crop_name,
+                "n_frames": c["n"],
+                "first_t": round(c["first_t"], 2),
+                "last_t": round(c["last_t"], 2),
+                "sim": round(c["peak_sim"], 3),  # best single-observation cosine to match
+                "temporal_sim": (
+                    None if c["temporal_sim"] is None else round(c["temporal_sim"], 3)
+                ),  # k-of-n aggregated score
+                "match": c["candidate"],  # closest gallery person
+                "recognized": recognized,  # temporal_sim >= threshold (3-of-5)
+                "emb": [round(float(v), 6) for v in c["rep_emb"]],  # for the contamination guard
+                # recognized -> informational (correct if wrong); unknown -> needs a name
+                "status": "recognized" if recognized else "pending",
+            }
+        )
+
+    # Carry ignore decisions across re-scans: any unknown matching a previously-ignored face
+    # (same video, cosine >= cluster_sim) is auto-marked skipped so it isn't asked about again.
+    ignored = load_ignored(out_dir)
+    if ignored:
+        for e in entries:
+            if e["recognized"]:
+                continue
+            q = np.asarray(e["emb"], dtype=np.float32)
+            if any(float(np.dot(g, q)) >= cluster_sim for g in ignored):
+                e["status"] = "skipped"
+
+    manifest = {
+        "video": str(video),
+        "video_id": video_id,
+        "threshold": threshold,
+        "rule": f"{TEMPORAL_K}of{TEMPORAL_N}",
+        "cluster_sim": cluster_sim,
+        "created": _dt.date.today().isoformat(),
+        "clusters": entries,
+    }
+    mpath = out_dir / "manifest.json"
+    mpath.write_text(json.dumps(manifest, indent=1))
+    return mpath
+
+
+def _assign(clusters, emb, sim, person, ts, quality, crop, cluster_sim, obs=None) -> None:
+    """Greedy online clustering of one face detection into `clusters` (in place)."""
+    best_i, best_s = -1, cluster_sim
+    for i, c in enumerate(clusters):
+        s = float(np.dot(c["rep_emb"], emb))  # both unit-norm -> cosine
+        if s >= best_s:
+            best_i, best_s = i, s
+    if best_i < 0:
+        new = {
+            "rep_emb": emb,
+            "rep_sim": sim,
+            "rep_closest": person,
+            "rep_quality": quality,
+            "crop": crop,
+            "n": 1,
+            "first_t": ts,
+            "last_t": ts,
+        }
+        if obs is not None:
+            new["obs"] = [obs]
+        clusters.append(new)
+        return
+    c = clusters[best_i]
+    c["n"] += 1
+    c["first_t"], c["last_t"] = min(c["first_t"], ts), max(c["last_t"], ts)
+    if obs is not None:
+        c.setdefault("obs", []).append(obs)
+    if quality > c["rep_quality"]:  # keep the highest-quality detection as the representative
+        c.update(rep_emb=emb, rep_sim=sim, rep_closest=person, rep_quality=quality, crop=crop)

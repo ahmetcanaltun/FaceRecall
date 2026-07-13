@@ -1,0 +1,22 @@
+# Real biometric data (reference photos/videos of individuals) - never commit
+data/reference_photos/*
+data/videos/*
+data/gallery.json
+!data/reference_photos/.gitkeep
+!data/videos/.gitkeep
+
+# Experiment outputs: annotated videos/frames of real people + embedding-derived data
+results/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# macOS
+.DS_Store
+
+# Tool caches
+.pytest_cache/
+.ruff_cache/

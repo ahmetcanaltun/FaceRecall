@@ -66,3 +66,49 @@ def log_decision(mdir: Path, record: dict) -> None:
 
 
 CONSISTENCY_MIN = 0.6  # re-detected crop face must still match the clustered face this closely
+
+
+def preflight(
+    crop_path: Path,
+    cluster_emb: list[float],
+    gallery_path: str,
+    threshold: float,
+    proposed_name: str,
+) -> tuple[dict | None, list[str]]:
+    """Embed the crop exactly as enroll() will, and return (record, warnings). enroll() picks
+    the most confident face in the crop, on a crowded crop that can be a different person than
+    the one we clustered (e.g. someone in the background), so we validate the face that will
+    actually be enrolled, not the manifest embedding. Warnings the reviewer must override:
+      * no face          -> can't enroll at all
+      * multiple faces   -> ambiguous which one enroll() will pick
+      * mismatch         -> the crop's main face isn't the one detected in the video
+      * contamination    -> that face is >= threshold-close to a different enrolled person
+    """
+    _app()  # warm shared detector/embedder
+    rec = G.embed_photo(crop_path)
+    if rec is None:
+        return None, ["no face could be detected in this crop"]
+    emb = np.asarray(rec["emb"], dtype=np.float32)
+
+    warnings: list[str] = []
+    if "multiple_faces" in rec["flags"]:
+        warnings.append(
+            "the crop contains more than one face, enroll() will pick the most "
+            "confident one, which may not be this person"
+        )
+    consistency = float(np.dot(G.l2(emb), G.l2(np.asarray(cluster_emb, dtype=np.float32))))
+    if consistency < CONSISTENCY_MIN:
+        warnings.append(
+            f"the crop's main face differs from the one seen in the video "
+            f"(cosine {consistency:.2f}), it may be a nearby/background person"
+        )
+    if Path(gallery_path).exists():
+        known = G.load_embeddings(gallery_path)
+        if known:
+            other, sim = G.match(emb, known)
+            if sim >= threshold and other != proposed_name:
+                warnings.append(
+                    f"this face is {sim:.2f}-close to **{other}**, already enrolled, "
+                    f"likely a mislabel"
+                )
+    return rec, warnings

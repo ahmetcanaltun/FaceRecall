@@ -107,3 +107,93 @@ def get_app():
         app.prepare(ctx_id=ctx, det_size=(640, 640))
         _APP = app
     return _APP
+
+
+# ---------------------------------------------------------------------------
+# enrollment
+# ---------------------------------------------------------------------------
+def _today() -> str:
+    return _dt.date.today().isoformat()
+
+
+def embed_photo(path: Path) -> dict | None:
+    """Embed the most confident face in one photo, returning a gallery record (or None
+    if no face is found / the image is unreadable). Records quality flags rather than
+    rejecting weak faces."""
+    import cv2
+
+    img = cv2.imread(str(path))
+    if img is None:
+        return None
+    app = get_app()
+    faces = app.get(img)
+    weak_detection = False
+    if not faces:  # retry once at the reference-photo threshold (see RETRY_DET_THRESH)
+        old_thresh = app.det_model.det_thresh
+        app.det_model.det_thresh = RETRY_DET_THRESH
+        try:
+            faces = app.get(img)
+        finally:
+            app.det_model.det_thresh = old_thresh
+        weak_detection = True
+    if not faces:
+        return None
+
+    face = max(faces, key=lambda d: d.det_score)  # reference photo = its most confident face
+    x1, y1, x2, y2 = map(int, face.bbox)
+    face_px = min(x2 - x1, y2 - y1)
+    img_min = min(img.shape[0], img.shape[1])
+
+    flags: list[str] = []
+    if weak_detection:
+        flags.append("weak_detection")  # only found by the RETRY_DET_THRESH second pass
+    if face.det_score < MIN_CONFIDENCE:
+        flags.append("low_confidence")
+    if face_px < MIN_FACE_PX:
+        flags.append("small_face")
+    if img_min and max(x2 - x1, y2 - y1) > MAX_FACE_FRACTION * img_min:
+        flags.append("large_face")
+    if len(faces) > 1:
+        flags.append("multiple_faces")  # ambiguous which subject, worth eyeballing
+
+    return {
+        "src": path.name,
+        "emb": [round(float(v), 6) for v in face.normed_embedding],
+        "det_score": round(float(face.det_score), 3),
+        "face_px": int(face_px),
+        "date": _today(),
+        "flags": flags,
+    }
+
+
+def enroll(gallery: dict, name: str, image_paths: list[Path], *, verbose: bool = True) -> int:
+    """Add embeddings for `name` from the given images into `gallery` (in place).
+    Returns the number of embeddings added. This is the single enrollment entry point
+    reused by the photo-folder build, the app's labeling flow, and the Wikimedia add-person
+    flow."""
+    person = gallery["people"].setdefault(name, {"embeddings": []})
+    added = 0
+    for p in sorted(image_paths):
+        if p.suffix.lower() not in IMAGE_EXTS:
+            continue
+        rec = embed_photo(p)
+        if rec is None:
+            if verbose:
+                print(f"    skip (no face / unreadable): {p.name}")
+            continue
+        person["embeddings"].append(rec)
+        added += 1
+        if verbose:
+            flagstr = f"  [{', '.join(rec['flags'])}]" if rec["flags"] else ""
+            print(f"    + {p.name}  det={rec['det_score']:.2f}  face={rec['face_px']}px{flagstr}")
+    return added
+
+
+def build_from_photos(photos_root: str) -> dict:
+    """Fresh gallery from data/reference_photos/<person>/*.<img>."""
+    gallery = new_gallery()
+    for pdir in sorted(p for p in Path(photos_root).iterdir() if p.is_dir()):
+        print(f"  {pdir.name}:")
+        enroll(gallery, pdir.name, list(pdir.iterdir()))
+    touch(gallery)
+    return gallery

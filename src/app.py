@@ -277,3 +277,184 @@ def render_gallery(gallery_path, photos_root):
 
     for name in sorted(people):
         _render_person_card(name, people[name]["embeddings"], gallery, gallery_path, photos_root)
+
+
+def _download_box():
+    """The 'paste a YouTube link' control. Downloads via video_library (best quality up to
+    1080p when ffmpeg is present) and auto-selects it. Optional start/end minutes download
+    just that section, the usual case, since a person is on screen only briefly in a long clip."""
+    url = st.text_input(
+        "Paste a YouTube link", key="yt_url", placeholder="https://youtube.com/watch?v=..."
+    )
+    ffmpeg = VL.has_ffmpeg()
+    c_s, c_e = st.columns(2)
+    start_min = c_s.number_input(
+        "From (min)",
+        min_value=0.0,
+        value=0.0,
+        step=0.5,
+        disabled=not ffmpeg,
+        help=None if ffmpeg else "Install ffmpeg to download a section.",
+    )
+    end_min = c_e.number_input(
+        "To (min, 0 = end)", min_value=0.0, value=0.0, step=0.5, disabled=not ffmpeg
+    )
+    if st.button("Download & recognize", type="primary", disabled=not url):
+        bar = st.progress(0.0, text="starting...")
+
+        def hook(d):
+            if d.get("status") == "downloading" and d.get("total_bytes"):
+                bar.progress(
+                    min(d["downloaded_bytes"] / d["total_bytes"], 1.0), text="downloading..."
+                )
+
+        start = start_min * 60 if (ffmpeg and (start_min or end_min)) else None
+        end = end_min * 60 if (ffmpeg and end_min) else None
+        path = None
+        try:
+            with st.spinner("Downloading..."):
+                path = VL.download(url, progress_hook=hook, start=start, end=end)
+        except Exception as e:
+            st.error(f"Download failed: {e}")
+        bar.empty()
+        if path is not None:
+            # non-widget key, consumed at the top of main() before the picker is built, so it
+            # can select the new video without the "modified after instantiated" error. rerun is
+            # kept outside the try so its control-flow exception isn't swallowed as a failure.
+            st.session_state["_pending_video"] = str(path)
+            st.session_state["_auto_scan"] = True  # URL flow = one hamle: scan right after download
+            st.rerun()
+
+
+DEF_INTERVAL, DEF_THRESHOLD, DEF_CLUSTER = 0.5, G.DEFAULT_THRESHOLD, 0.50
+
+
+def _settings() -> tuple[str, float, float, float]:
+    """Sidebar 'Advanced' settings, shared by every page. Stable widget keys mean the values
+    persist as you move between pages. Calibrated defaults are tucked away so the common flow
+    stays 'paste a link -> recognize'."""
+    with st.sidebar, st.expander("Advanced settings", expanded=False):
+        gallery_path = st.text_input("Gallery file", GALLERY, key="cfg_gallery")
+        interval = st.slider(
+            "Sample every ... seconds", 0.2, 2.0, DEF_INTERVAL, 0.1, key="cfg_interval"
+        )
+        threshold = st.slider(
+            "Recognition threshold",
+            0.20,
+            0.60,
+            DEF_THRESHOLD,
+            0.01,
+            key="cfg_threshold",
+            help="Calibrated value is 0.40. A person is recognized iff "
+            ">=3 of some 5 consecutive samples reach this (the 3-of-5 "
+            "rule), so someone seen <3 samples stays unknown.",
+        )
+        cluster_sim = st.slider(
+            "Same-person grouping cutoff",
+            0.30,
+            0.80,
+            DEF_CLUSTER,
+            0.05,
+            key="cfg_cluster",
+            help="Heuristic for merging one stranger's frames into one card.",
+        )
+    return gallery_path, interval, threshold, cluster_sim
+
+
+def _video_source() -> Path | None:
+    """Render the video picker (paste-link / library / upload) plus a modest-size preview, and
+    return the chosen video path (or None). Stable keys keep the selection across reruns."""
+    vids = VL.library()
+    options = ["- none -"] + [str(p) for p in vids]
+    pending = st.session_state.pop("_pending_video", None)  # set by download / rename-to-people
+    if pending and pending in options:
+        st.session_state["video_pick"] = pending
+    elif st.session_state.get("video_pick") not in options:
+        st.session_state["video_pick"] = options[1] if vids else "- none -"
+
+    _download_box()  # paste link -> download + auto-recognize
+    lib_col, up_col = st.columns(2)
+    with lib_col:
+        picked = st.selectbox(
+            "Choose from the library",
+            options,
+            key="video_pick",
+            format_func=lambda s: s if s == "- none -" else VL.title_for(s),
+        )
+    with up_col:
+        uploaded = st.file_uploader("...or upload a file", type=[e[1:] for e in VIDEO_EXTS])
+
+    video_path: Path | None = None
+    if uploaded is not None:
+        video_path = save_upload(uploaded)
+    elif picked != "- none -":
+        video_path = Path(picked)
+    if video_path is not None:
+        prev, _spacer = st.columns([2, 3])  # keep the preview modest, not full-screen-wide
+        prev.video(str(video_path))
+    return video_path
+
+
+def page_recognize() -> None:
+    """Main page: find who's in a video and name anyone it doesn't recognize."""
+    gallery_path, interval, threshold, cluster_sim = _settings()
+    st.header("Recognize")
+    video_path = _video_source()
+    if video_path is None:
+        return
+
+    thorough = st.checkbox(
+        "Thorough, every frame (slower, catches brief faces)",
+        value=False,
+    )
+    scan_interval = 0.0 if thorough else interval  # 0 -> step 1 -> every frame
+    have_scan = (
+        st.session_state.get("manifest_path")
+        and Path(st.session_state.get("manifest_path", "")).exists()
+        and st.session_state.get("manifest_video") == str(video_path)
+    )
+    # URL flow: a fresh download set _auto_scan, so recognition runs immediately with no extra
+    # click. Pick/upload sources still use the explicit button below.
+    if st.session_state.pop("_auto_scan", False):
+        stats, _ = run_scan(video_path, gallery_path, threshold, cluster_sim, scan_interval)
+        have_scan = True
+        st.success(
+            f"Scanned {stats['sampled']} frames · {stats['detections']} faces seen · "
+            f"**{stats['recognized']} recognized**, **{stats['unknown']} unknown**."
+        )
+    c_find, c_verify = st.columns(2)
+    if c_find.button("Recognize faces", type="primary"):
+        stats, _ = run_scan(video_path, gallery_path, threshold, cluster_sim, scan_interval)
+        have_scan = True
+        st.success(
+            f"Scanned {stats['sampled']} frames · {stats['detections']} faces seen · "
+            f"**{stats['recognized']} recognized**, **{stats['unknown']} unknown**."
+        )
+    if have_scan and c_verify.button("Re-scan to verify"):
+        prev = set(st.session_state.get("scan_recognized", []))
+        prev_unknown = st.session_state.get("scan_unknown")
+        stats, recognized = run_scan(
+            video_path, gallery_path, threshold, cluster_sim, scan_interval
+        )
+        newly = sorted(set(recognized) - prev)
+        if newly:
+            st.success(
+                "Now recognized: "
+                + ", ".join(R.pretty(n) for n in newly)
+                + f"  ·  unknown {prev_unknown} -> {stats['unknown']}."
+            )
+        else:
+            st.info(f"No change, still {stats['unknown']} unknown.")
+
+    if have_scan:
+        mpath = st.session_state["manifest_path"]
+        manifest = R.load_manifest(mpath)
+        ppl = sorted({c["match"] for c in manifest["clusters"] if c.get("recognized")})
+        if ppl:
+            label = ", ".join(R.pretty(p) for p in ppl)
+            if st.button(f"Rename video to the people in it, {label}"):
+                newp = VL.rename_to_people(video_path, ppl)
+                st.session_state["_pending_video"] = str(newp)
+                st.session_state["manifest_video"] = str(newp)
+                st.rerun()
+        R.render_manifest(mpath, gallery_path, PHOTOS_ROOT)

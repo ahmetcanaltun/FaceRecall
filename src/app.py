@@ -118,3 +118,162 @@ def _enroll_wiki_pick(
     if added == 0:
         return 0, f"{cand['title']}: no face re-detected on enroll, skipped."
     return added, None
+
+
+def render_add_person(gallery_path, photos_root, threshold):
+    """The 'Add person' page: type a name -> fetch candidate face photos from Wikimedia
+    (rights-clear, official API, see wiki_faces) -> pick the ones that are really that person
+    -> enroll them. No manual downloading/copying of reference photos."""
+    st.subheader("Add a new person from Wikimedia")
+    name_raw = st.text_input("Person's name", placeholder="e.g. İlkay Işık", key="wiki_name_in")
+    if st.button("Search Wikimedia", disabled=not name_raw):
+        with st.spinner(f"Searching Wikimedia for '{name_raw}'..."):
+            st.session_state["wiki_cands"] = W.fetch_face_candidates(get_app(), name_raw)
+        st.session_state["wiki_name"] = name_raw
+        for k in list(st.session_state):  # clear stale pick checkboxes from a previous search
+            if k.startswith("wpick_"):
+                st.session_state.pop(k)
+
+    cands = st.session_state.get("wiki_cands")
+    name = st.session_state.get("wiki_name")
+    if cands is None:
+        return
+    if not cands:
+        st.warning(
+            f"No usable face photos found on Wikimedia for '{name}'. Try the full "
+            "name as it appears on Wikipedia."
+        )
+        return
+
+    norm = R.norm_name(name)
+    existing = norm in G.load(gallery_path)["people"] if Path(gallery_path).exists() else False
+    if existing:
+        st.caption(f"**{R.pretty(norm)}** is already enrolled, selections add to them.")
+    cols = st.columns(4)
+    for i, c in enumerate(cands):
+        with cols[i % 4], st.container(border=True):
+            st.image(c["crop_path"], width="stretch")
+            st.checkbox("use this one", key=f"wpick_{i}")
+            st.caption(f"{c['license']} · det {c['det_score']:.2f}")
+            st.markdown(f"[source]({c['source_url']})")
+
+    override = st.checkbox("Add anyway (override the contamination warnings)", key="wiki_override")
+    if st.button(f"Add selected as {R.pretty(norm)}", type="primary", disabled=not norm):
+        picked = [c for i, c in enumerate(cands) if st.session_state.get(f"wpick_{i}")]
+        if not picked:
+            st.warning("Tick at least one face first.")
+            return
+        added_total, warnings = 0, []
+        for c in picked:
+            added, warn = _enroll_wiki_pick(c, norm, gallery_path, photos_root, threshold, override)
+            added_total += added
+            if warn:
+                warnings.append(warn)
+        for w in warnings:
+            st.error(w)
+        if added_total:
+            st.success(f"Enrolled **{added_total}** as **{R.pretty(norm)}**.")
+            st.session_state.pop("wiki_cands", None)  # done; clear the candidate grid
+            st.rerun()
+
+
+def _render_person_card(name, embs, gallery, gallery_path, photos_root):
+    """One bordered person card: name + count, a thumbnail strip, and (behind an expander to
+    keep the page clean) the rename / delete / drop-photo controls."""
+    with st.container(border=True):
+        top, act = st.columns([4, 1])
+        flags = sum(len(e.get("flags", [])) for e in embs)
+        top.markdown(f"#### {R.pretty(name)}")
+        top.caption(
+            f"{len(embs)} reference photo(s)" + (f" · {flags} quality flag(s)" if flags else "")
+        )
+        manage = act.toggle(
+            "Manage", key=f"manage_{name}", help="Rename, delete, or drop a reference photo"
+        )
+
+        thumbs = st.columns(min(len(embs), 8) or 1)
+        for i, e in enumerate(embs):
+            f = Path(photos_root) / name / e["src"]
+            with thumbs[i % len(thumbs)]:
+                if f.exists():
+                    st.image(str(f), width="stretch")
+                if e.get("flags"):
+                    st.caption(", ".join(e["flags"]))
+                if manage and st.button("remove", key=f"rm_{name}_{e['src']}"):
+                    G.delete_embedding(gallery, name, e["src"], photos_root)
+                    G.touch(gallery)
+                    G.save(gallery, gallery_path)
+                    st.rerun()
+
+        if manage:
+            ren, rbtn, dele = st.columns([3, 1, 1])
+            new_raw = ren.text_input(
+                "Rename to",
+                key=f"rn_{name}",
+                placeholder=R.pretty(name),
+                label_visibility="collapsed",
+            )
+            if rbtn.button("Rename", key=f"rnbtn_{name}"):
+                nn = R.norm_name(new_raw)
+                if nn and nn != name:
+                    try:
+                        G.rename_person(gallery, name, nn, photos_root)
+                        G.touch(gallery)
+                        G.save(gallery, gallery_path)
+                        st.rerun()
+                    except ValueError as e:
+                        st.error(str(e))
+            if dele.button("Delete", key=f"del_{name}"):
+                st.session_state[f"confirm_del_{name}"] = True
+            if st.session_state.get(f"confirm_del_{name}"):
+                st.warning(f"Delete **{R.pretty(name)}** and all their reference photos?")
+                yes, no = st.columns(2)
+                if yes.button("Yes, delete", key=f"delyes_{name}"):
+                    G.delete_person(gallery, name, photos_root)
+                    G.touch(gallery)
+                    G.save(gallery, gallery_path)
+                    st.session_state.pop(f"confirm_del_{name}", None)
+                    st.rerun()
+                if no.button("Cancel", key=f"delno_{name}"):
+                    st.session_state.pop(f"confirm_del_{name}", None)
+                    st.rerun()
+
+
+def render_gallery(gallery_path, photos_root):
+    """The gallery tab: a clean roster of enrolled people as cards (name, thumbnails), each with
+    per-card management (rename / delete / drop a bad reference photo) behind a Manage toggle,
+    plus a merge control. A summary strip up top reads at a glance."""
+    if not Path(gallery_path).exists():
+        st.info("No one enrolled yet, use Add person.")
+        return
+    gallery = G.load(gallery_path)
+    people = gallery["people"]
+    total = sum(len(p["embeddings"]) for p in people.values())
+    flagged = sum(1 for p in people.values() for e in p["embeddings"] if e.get("flags"))
+
+    a, b, c = st.columns(3)
+    a.metric("People", len(people))
+    b.metric("Reference photos", total)
+    c.metric("Quality-flagged", flagged)
+
+    if len(people) >= 2:
+        with st.expander("Merge two people into one"):
+            names = sorted(people)
+            c1, c2, c3 = st.columns([2, 2, 1])
+            keep = c1.selectbox("Keep", names, key="merge_keep", format_func=R.pretty)
+            drop = c2.selectbox(
+                "Merge this one in",
+                [n for n in names if n != keep],
+                key="merge_drop",
+                format_func=R.pretty,
+            )
+            c3.markdown("<div style='height:1.7em'></div>", unsafe_allow_html=True)
+            if c3.button("Merge", key="merge_go"):
+                moved = G.merge_people(gallery, drop, keep, photos_root)
+                G.touch(gallery)
+                G.save(gallery, gallery_path)
+                st.success(f"Merged {R.pretty(drop)} -> {R.pretty(keep)} ({moved} photos).")
+                st.rerun()
+
+    for name in sorted(people):
+        _render_person_card(name, people[name]["embeddings"], gallery, gallery_path, photos_root)

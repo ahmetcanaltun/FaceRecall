@@ -1,0 +1,279 @@
+<title>Yüz Tanıma Pipeline'ı, Şekil 1</title>
+<style>
+  :root {
+    --paper:#f5f6f9; --card:#ffffff; --ink:#191c23; --muted:#5b6472;
+    --line:#dde1ea; --line-strong:#c7cdda;
+    --accent:#3b4ec7; --accent-ink:#2b3aa0; --accent-soft:#ebedfb;
+    --good:#2b8a3e; --good-soft:#e7f4ea; --good-line:#bfe2c6;
+    --warn:#b5650a; --warn-soft:#fbeedd; --warn-line:#f0d3ab;
+    --shadow:0 1px 2px rgba(20,25,45,.05), 0 6px 20px rgba(20,25,45,.05);
+    --sans:-apple-system,system-ui,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    --mono:ui-monospace,"SF Mono",SFMono-Regular,Menlo,Consolas,monospace;
+  }
+  @media (prefers-color-scheme:dark){
+    :root{
+      --paper:#0f1116; --card:#181b22; --ink:#e9ecf2; --muted:#98a1b2;
+      --line:#282d38; --line-strong:#39404e;
+      --accent:#96a4ff; --accent-ink:#b3bcff; --accent-soft:#1c2140;
+      --good:#5cc470; --good-soft:#16301d; --good-line:#274d30;
+      --warn:#e3a24d; --warn-soft:#352713; --warn-line:#4d3a1a;
+      --shadow:0 1px 2px rgba(0,0,0,.3), 0 6px 22px rgba(0,0,0,.35);
+    }
+  }
+  :root[data-theme="light"]{
+    --paper:#f5f6f9; --card:#ffffff; --ink:#191c23; --muted:#5b6472;
+    --line:#dde1ea; --line-strong:#c7cdda;
+    --accent:#3b4ec7; --accent-ink:#2b3aa0; --accent-soft:#ebedfb;
+    --good:#2b8a3e; --good-soft:#e7f4ea; --good-line:#bfe2c6;
+    --warn:#b5650a; --warn-soft:#fbeedd; --warn-line:#f0d3ab;
+    --shadow:0 1px 2px rgba(20,25,45,.05), 0 6px 20px rgba(20,25,45,.05);
+  }
+  :root[data-theme="dark"]{
+    --paper:#0f1116; --card:#181b22; --ink:#e9ecf2; --muted:#98a1b2;
+    --line:#282d38; --line-strong:#39404e;
+    --accent:#96a4ff; --accent-ink:#b3bcff; --accent-soft:#1c2140;
+    --good:#5cc470; --good-soft:#16301d; --good-line:#274d30;
+    --warn:#e3a24d; --warn-soft:#352713; --warn-line:#4d3a1a;
+    --shadow:0 1px 2px rgba(0,0,0,.3), 0 6px 22px rgba(0,0,0,.35);
+  }
+
+  *{box-sizing:border-box;}
+  body{margin:0;}
+  .wrap{
+    font-family:var(--sans); color:var(--ink); background:var(--paper);
+    min-height:100vh; padding:clamp(20px,4vw,52px);
+    display:flex; flex-direction:column; align-items:center; gap:34px;
+    -webkit-font-smoothing:antialiased;
+  }
+  .sheet{width:100%; max-width:1080px; display:flex; flex-direction:column; gap:30px;}
+
+  /* header */
+  header{display:flex; flex-direction:column; gap:10px;}
+  .eyebrow{
+    font-family:var(--mono); font-size:.72rem; letter-spacing:.14em;
+    text-transform:uppercase; color:var(--accent-ink); margin:0;
+  }
+  h1{
+    font-size:clamp(1.5rem,3.4vw,2.15rem); line-height:1.1; margin:0;
+    letter-spacing:-.02em; text-wrap:balance; font-weight:650;
+  }
+  .lede{font-size:clamp(.98rem,1.6vw,1.08rem); color:var(--muted); margin:0; max-width:60ch; line-height:1.5;}
+
+  /* pipeline */
+  .pipeline{
+    display:flex; align-items:stretch; gap:0; overflow-x:auto;
+    padding:4px 2px 12px; scrollbar-width:thin;
+  }
+  .stage{
+    flex:0 0 auto; width:186px; background:var(--card); border:1px solid var(--line);
+    border-radius:13px; padding:15px 15px 16px; box-shadow:var(--shadow);
+    display:flex; flex-direction:column; gap:8px;
+  }
+  .stage .tag{
+    font-family:var(--mono); font-size:.66rem; letter-spacing:.1em; text-transform:uppercase;
+    color:var(--muted); display:flex; align-items:center; gap:7px;
+  }
+  .stage .num{
+    color:var(--accent-ink); font-weight:600;
+  }
+  .stage h3{margin:0; font-size:1.02rem; font-weight:620; letter-spacing:-.01em;}
+  .stage p{margin:0; font-size:.82rem; line-height:1.45; color:var(--muted);}
+  .stage .model{
+    font-family:var(--mono); font-size:.7rem; color:var(--ink); background:var(--paper);
+    border:1px solid var(--line); border-radius:6px; padding:4px 7px; align-self:flex-start;
+    margin-top:2px;
+  }
+  .stage.heart{
+    border-color:var(--accent); background:
+      linear-gradient(var(--accent-soft),var(--accent-soft)) padding-box, var(--card);
+    box-shadow:0 2px 4px rgba(59,78,199,.12), 0 10px 28px rgba(59,78,199,.14);
+  }
+  .stage.heart .heartbadge{
+    font-family:var(--mono); font-size:.6rem; letter-spacing:.1em; text-transform:uppercase;
+    color:#fff; background:var(--accent); border-radius:5px; padding:2px 6px; font-weight:600;
+  }
+  .stage.heart .model{background:var(--card); border-color:var(--accent);}
+
+  .arrow{
+    flex:0 0 auto; align-self:center; width:34px; display:grid; place-items:center;
+    color:var(--line-strong);
+  }
+  .arrow svg{width:22px; height:22px; display:block;}
+
+  /* decision pills inside last stage */
+  .branch{display:flex; flex-direction:column; gap:7px; margin-top:2px;}
+  .pill{
+    font-family:var(--mono); font-size:.72rem; border-radius:7px; padding:6px 9px;
+    display:flex; align-items:center; gap:7px; line-height:1.2; border:1px solid transparent;
+  }
+  .pill.good{background:var(--good-soft); color:var(--good); border-color:var(--good-line);}
+  .pill.warn{background:var(--warn-soft); color:var(--warn); border-color:var(--warn-line);}
+  .pill b{font-weight:700;}
+  .dot{width:8px; height:8px; border-radius:50%; flex:0 0 auto;}
+  .dot.good{background:var(--good);} .dot.warn{background:var(--warn);}
+
+  /* enrollment lane */
+  .lane{
+    background:var(--card); border:1px solid var(--line); border-left:3px solid var(--accent);
+    border-radius:13px; padding:20px 22px; box-shadow:var(--shadow);
+    display:flex; flex-direction:column; gap:14px;
+  }
+  .lane .head{display:flex; flex-wrap:wrap; align-items:center; gap:12px; justify-content:space-between;}
+  .lane h2{margin:0; font-size:1.08rem; font-weight:640; letter-spacing:-.01em;}
+  .lane .eyebrow{margin:0 0 3px;}
+  .nobadge{
+    font-family:var(--mono); font-size:.7rem; letter-spacing:.06em; text-transform:uppercase;
+    color:var(--good); background:var(--good-soft); border:1px solid var(--good-line);
+    border-radius:7px; padding:5px 10px; font-weight:600; white-space:nowrap;
+  }
+  .flow{
+    display:flex; flex-wrap:wrap; align-items:center; gap:8px;
+    font-family:var(--mono); font-size:.78rem;
+  }
+  .chip{
+    background:var(--paper); border:1px solid var(--line); border-radius:7px;
+    padding:6px 10px; color:var(--ink);
+  }
+  .chip.mid{color:var(--muted); font-style:normal;}
+  .chip.store{border-color:var(--accent); color:var(--accent-ink); background:var(--accent-soft);}
+  .flow .sep{color:var(--line-strong); font-weight:700;}
+  .lane p{margin:0; font-size:.88rem; line-height:1.55; color:var(--muted); max-width:70ch;}
+  .lane p b{color:var(--ink); font-weight:640;}
+
+  /* facts */
+  .facts{
+    display:flex; flex-wrap:wrap; gap:8px 10px; padding-top:2px;
+  }
+  .fact{
+    font-family:var(--mono); font-size:.73rem; color:var(--muted);
+    border:1px solid var(--line); border-radius:20px; padding:6px 12px; background:var(--card);
+  }
+  .fact b{color:var(--ink); font-weight:640;}
+
+  footer{
+    font-size:.76rem; color:var(--muted); border-top:1px solid var(--line);
+    padding-top:14px; line-height:1.5;
+  }
+  footer code{font-family:var(--mono); font-size:.72rem; color:var(--ink);}
+
+  /* reveal */
+  @media (prefers-reduced-motion:no-preference){
+    .stage,.lane,.fact{animation:rise .5s cubic-bezier(.2,.7,.3,1) both;}
+    .pipeline .stage:nth-child(1){animation-delay:.02s}
+    .pipeline .stage:nth-child(3){animation-delay:.06s}
+    .pipeline .stage:nth-child(5){animation-delay:.10s}
+    .pipeline .stage:nth-child(7){animation-delay:.14s}
+    .pipeline .stage:nth-child(9){animation-delay:.18s}
+    .pipeline .stage:nth-child(11){animation-delay:.22s}
+    @keyframes rise{from{opacity:0; transform:translateY(9px);}to{opacity:1; transform:none;}}
+  }
+
+  @media (max-width:760px){
+    .pipeline{flex-direction:column; align-items:stretch; overflow-x:visible;}
+    .stage{width:100%;}
+    .arrow{transform:rotate(90deg); margin:2px 0;}
+  }
+</style>
+
+<div class="wrap">
+  <div class="sheet">
+    <header>
+      <p class="eyebrow">Şekil 1 · Sistem Mimarisi</p>
+      <h1>Bir video karesi nasıl bir kimliğe dönüşüyor</h1>
+      <p class="lede">Gömme-vektör (embedding) tabanlı tanıma: yüz bir sayı dizisine çevrilir,
+        galeride kayıtlı vektörlerle karşılaştırılır. Kişi eklemek <em>model eğitmek değildir</em>,
+        aşağıdaki kayıt şeridi bunu gösterir.</p>
+    </header>
+
+    <div class="pipeline" role="list" aria-label="Tanıma aşamaları">
+      <div class="stage" role="listitem">
+        <span class="tag"><span class="num">01</span> Girdi</span>
+        <h3>Video karesi</h3>
+        <p>Kareye ayrılmış video ya da tek fotoğraf.</p>
+        <span class="model">~her 0.4 sn örnekleme</span>
+      </div>
+
+      <div class="arrow" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h13M13 6l6 6-6 6"/></svg></div>
+
+      <div class="stage" role="listitem">
+        <span class="tag"><span class="num">02</span> Tespit</span>
+        <h3>Yüz tespiti</h3>
+        <p>Her yüzün <b>kutusu</b> + 5 anahtar nokta. Segmentasyon (piksel maskesi) değil.</p>
+        <span class="model">det_10g.onnx · RetinaFace</span>
+      </div>
+
+      <div class="arrow" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h13M13 6l6 6-6 6"/></svg></div>
+
+      <div class="stage" role="listitem">
+        <span class="tag"><span class="num">03</span> Hizalama</span>
+        <h3>Hizalama</h3>
+        <p>Anahtar noktalarla yüz standart konuma döndürülür (poz normalize edilir).</p>
+        <span class="model">→ 112 × 112 px</span>
+      </div>
+
+      <div class="arrow" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h13M13 6l6 6-6 6"/></svg></div>
+
+      <div class="stage heart" role="listitem">
+        <span class="tag"><span class="num">04</span> Embedding <span class="heartbadge">işin kalbi</span></span>
+        <h3>Vektöre çevirme</h3>
+        <p>Hizalı yüz → <b>512 sayılık vektör</b>. Aynı kişi → yakın, farklı kişi → uzak.</p>
+        <span class="model">w600k_r50.onnx · ArcFace</span>
+      </div>
+
+      <div class="arrow" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h13M13 6l6 6-6 6"/></svg></div>
+
+      <div class="stage" role="listitem">
+        <span class="tag"><span class="num">05</span> Kıyas</span>
+        <h3>Galeriyle karşılaştırma</h3>
+        <p>Vektör, galerideki tüm kayıtlı vektörlerle <b>kosinüs benzerliğiyle</b> kıyaslanır.</p>
+        <span class="model">cosine · en yakın kişi</span>
+      </div>
+
+      <div class="arrow" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h13M13 6l6 6-6 6"/></svg></div>
+
+      <div class="stage" role="listitem">
+        <span class="tag"><span class="num">06</span> Karar</span>
+        <h3>Kimlik</h3>
+        <div class="branch">
+          <span class="pill good"><span class="dot good"></span><b>≥ 0.40</b>&nbsp;→ tanındı</span>
+          <span class="pill warn"><span class="dot warn"></span><b>&lt; 0.40</b>&nbsp;→ bilinmiyor</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="lane">
+      <div class="head">
+        <div>
+          <p class="eyebrow">Kayıt · Kişi Ekleme</p>
+          <h2>Referans fotoğraf neden ekleniyor?</h2>
+        </div>
+        <span class="nobadge">Model eğitimi yok · ağırlıklar donuk (frozen)</span>
+      </div>
+      <div class="flow" aria-label="Kayıt akışı">
+        <span class="chip">Referans foto</span>
+        <span class="sep">→</span>
+        <span class="chip mid">Tespit → Hizala → Embedding</span>
+        <span class="sep">→</span>
+        <span class="chip store">gallery.json'a vektör eklenir</span>
+      </div>
+      <p>Tanıma bir <b>karşılaştırma</b> işidir: "bu an enrolled person" diyebilmek için galeride önceden bir
+        an enrolled person vektörü olmalı. Referans fotoğraflar tam olarak budur, <b>isimli vektör listesi</b>.
+        Yeni kişi eklemek, aynı embedding'i hesaplayıp listeye bir satır yazmaktan ibarettir:
+        <b>model hiçbir şey öğrenmez, yeniden eğitim gerekmez, 1 fotoğraf bile yeter.</b></p>
+    </div>
+
+    <div class="facts">
+      <span class="fact">Backend: <b>InsightFace buffalo_l</b></span>
+      <span class="fact">Embedding: <b>512 boyut</b></span>
+      <span class="fact">Benzerlik: <b>kosinüs</b></span>
+      <span class="fact">Eşik: <b>0.40</b></span>
+      <span class="fact">Eğitim: <b>yok (önceden eğitilmiş, donuk)</b></span>
+    </div>
+
+    <footer>
+      Kod karşılıkları: tespit + embedding <code>gallery.py:get_app()</code> · kayıt
+      <code>gallery.py:enroll()</code> · karşılaştırma <code>gallery.py:match()</code> ·
+      eşik 0.40 Task 4'te kalibre edildi. Yürütme: Apple GPU/ANE (CoreML), macOS dışında CPU.
+    </footer>
+  </div>
+</div>

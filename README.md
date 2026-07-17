@@ -78,10 +78,14 @@ The app opens in your browser with five pages:
 | **Add person** | type a name -> rights-clear candidate portraits fetched from Wikimedia Commons -> pick -> enrolled |
 | **Gallery** | browse / rename / merge / delete enrolled people |
 
-There's also a standalone real-time window (tracked overlay, webcam supported):
+There's also a standalone real-time window that only boxes + names the people it recognizes
+and ignores everyone else, no learning. The source can be a file, a webcam (`--video 0`), or
+a YouTube link (streamed live, nothing downloaded):
 
 ```bash
 .venv/bin/python src/live_recognition.py --video data/videos/video_01.mp4
+.venv/bin/python src/live_recognition.py --video 0                        # webcam
+.venv/bin/python src/live_recognition.py --video "https://youtu.be/XXXX"  # YouTube stream
 ```
 
 Rebuild the gallery from `data/reference_photos/<person>/*.jpg` (rare maintenance):

@@ -1,19 +1,16 @@
 #!/usr/bin/env python3
 """
-Watch recognition happen live in a window (video file OR webcam), the real-time overlay.
+Watch recognition happen live in a window, the real-time overlay.
 
-By default this runs TRACKED: the expensive detection + embedding pass runs only every
-`--detect-every` seconds (default 0.4 s, the same cadence the batch scan samples at) and a
-Kalman tracker (`tracking.FaceTracker`, norfair) carries each face's box through the frames
-in between, so playback runs at (near) video rate instead of a few fps. Each track's label
-is decided with the same 3-of-5 temporal rule as the batch scan: a face shows as a gray "?"
-until >=3 of some 5 consecutive observations reach the threshold, then flips to a green name.
-`--no-track` restores the legacy per-frame mode (full detection every frame; slow, but the
-label reacts instantly).
+Full detection + match runs on every frame: each face is embedded and compared to the enrolled
+gallery, and only the ones it recognizes (cosine >= the calibrated 0.40 threshold) get a green
+box + name. Everyone it doesn't recognize is left alone, no box, no label, no learning (use
+--show-unknown to also draw sub-threshold faces as a gray "?"). The label reacts instantly, and
+boxes always sit on the actual detected face.
 
-Runs on the CoreML provider (~42 ms/frame on M1 Pro, see gallery.get_app), matches against
-the enrolled gallery (data/gallery.json), and labels using the calibrated 0.40 threshold.
-Sub-threshold faces are hidden by default (use --show-unknown to see them as gray "?").
+Source can be a video file, a webcam (--video 0), or a YouTube link (streamed live via
+video_library.stream_url, nothing is downloaded). Runs on the CoreML provider (~42 ms/frame on
+M1 Pro, see gallery.get_app).
 
 >>> This opens a GUI window, so run it yourself in your terminal, the window shows on your
     screen (a background/automation process can't display it). Controls: 'q' or ESC = quit,
@@ -24,7 +21,6 @@ Usage:
     python src/live_recognition.py --video 0                        # webcam
     python src/live_recognition.py --video "https://youtu.be/XXXX"  # YouTube (streamed, no download)
     python src/live_recognition.py --video X.mp4 --show-unknown --record results/live.mp4
-    python src/live_recognition.py --video X.mp4 --no-track        # legacy per-frame mode
 """
 
 from __future__ import annotations
@@ -37,9 +33,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-import collect_unknowns as C  # shared per-frame detect+match (detect_matches)
 import gallery as G  # shared CoreML detector/embedder + gallery match
-import tracking as T  # Kalman tracking between sparse detections + 3-of-5 track labels
 import video_library as VL  # resolve a YouTube link to a stream URL (no download)
 
 MIN_DET_SCORE = 0.5
@@ -99,18 +93,6 @@ def main() -> None:
         help="no GUI window (for testing), process --limit frames and exit",
     )
     ap.add_argument("--limit", type=int, default=0, help="stop after N frames (0 = all)")
-    ap.add_argument(
-        "--detect-every",
-        type=float,
-        default=0.4,
-        help="seconds between full detection passes; the tracker carries the "
-        "boxes in between (same cadence the batch scan samples at)",
-    )
-    ap.add_argument(
-        "--no-track",
-        action="store_true",
-        help="legacy per-frame mode: full detection on every frame (slow)",
-    )
     args = ap.parse_args()
 
     app = G.get_app()
@@ -144,9 +126,6 @@ def main() -> None:
     if not args.headless:
         print("Live window opening, focus it, then press 'q' or ESC to quit, space to pause.")
 
-    tracker = None if args.no_track else T.FaceTracker(threshold=args.threshold)
-    detect_step = max(1, int(round(fps_in * args.detect_every)))
-
     idx = 0
     fps = 0.0
     t_last = time.perf_counter()
@@ -156,12 +135,7 @@ def main() -> None:
             ok, frame = cap.read()
             if not ok:
                 break
-            if tracker is None:  # legacy: full detection on every frame
-                annotate(frame, app, gallery, args.threshold, args.show_unknown)
-            else:  # tracked: detect sparsely, Kalman-predict the boxes in between
-                faces = C.detect_matches(app, gallery, frame) if idx % detect_step == 0 else None
-                tracks = tracker.update(faces, period=detect_step)
-                T.draw_tracks(frame, tracks, show_unknown=args.show_unknown)
+            annotate(frame, app, gallery, args.threshold, args.show_unknown)
             now = time.perf_counter()
             dt = now - t_last
             t_last = now

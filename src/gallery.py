@@ -103,7 +103,13 @@ def get_app():
             providers, ctx = ["CoreMLExecutionProvider", "CPUExecutionProvider"], 0
         else:
             providers, ctx = ["CPUExecutionProvider"], -1
-        app = FaceAnalysis(name="buffalo_l", providers=providers)
+        # Only the two models we actually use. buffalo_l ships 5; without this, app.get()
+        # also runs 106-point landmarks, 3D landmarks and age/gender on every face, ~45 ms
+        # of pure waste per frame on crowded footage (measured 2026-07-17: 106 -> 61 ms/frame
+        # on the live window's per-frame path, identical detections and embeddings).
+        app = FaceAnalysis(
+            name="buffalo_l", providers=providers, allowed_modules=["detection", "recognition"]
+        )
         app.prepare(ctx_id=ctx, det_size=(640, 640))
         _APP = app
     return _APP

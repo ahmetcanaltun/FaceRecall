@@ -237,8 +237,8 @@ def download(
 
 def stream_url(url: str) -> tuple[str, str, str]:
     """Resolve a YouTube (or other) link to a directly-readable media URL **without downloading
-    anything**, for streaming straight into OpenCV (the Live+learn page). Returns
-    (media_url, video_id, title).
+    anything**, for streaming straight into OpenCV (the Live+learn page, the live_recognition
+    window). Returns (media_url, video_id, title).
 
     Prefers a *video-only* mp4/avc1 stream up to 720p: recognition needs no audio, and
     YouTube's muxed *progressive* streams cap low (~360p, itag 18), so a video-only stream

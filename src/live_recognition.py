@@ -21,7 +21,8 @@ Sub-threshold faces are hidden by default (use --show-unknown to see them as gra
 
 Usage:
     python src/live_recognition.py --video data/videos/video_01.mp4
-    python src/live_recognition.py --video 0                       # webcam
+    python src/live_recognition.py --video 0                        # webcam
+    python src/live_recognition.py --video "https://youtu.be/XXXX"  # YouTube (streamed, no download)
     python src/live_recognition.py --video X.mp4 --show-unknown --record results/live.mp4
     python src/live_recognition.py --video X.mp4 --no-track        # legacy per-frame mode
 """
@@ -29,6 +30,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import re
 import time
 from pathlib import Path
 
@@ -38,6 +40,7 @@ import numpy as np
 import collect_unknowns as C  # shared per-frame detect+match (detect_matches)
 import gallery as G  # shared CoreML detector/embedder + gallery match
 import tracking as T  # Kalman tracking between sparse detections + 3-of-5 track labels
+import video_library as VL  # resolve a YouTube link to a stream URL (no download)
 
 MIN_DET_SCORE = 0.5
 
@@ -77,7 +80,10 @@ def annotate(frame, app, gallery, threshold, show_unknown) -> int:
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument(
-        "--video", required=True, help="path to a video file, or a camera index like 0 for webcam"
+        "--video",
+        required=True,
+        help="a video file path, a camera index like 0 for webcam, or a YouTube link "
+        "(streamed live, nothing is downloaded)",
     )
     ap.add_argument("--gallery", default="data/gallery.json")
     ap.add_argument(
@@ -111,7 +117,17 @@ def main() -> None:
     print(f"Loading gallery from {args.gallery} ...")
     gallery = G.embeddings_from(args.gallery)
 
-    src = int(args.video) if args.video.isdigit() else args.video
+    if args.video.isdigit():
+        src = int(args.video)  # webcam index
+    elif re.match(r"^(https?://|www\.)", args.video):
+        # A YouTube (or other) link: resolve it to a directly-readable media URL without
+        # downloading anything (same path the app's Live+learn page uses), then let OpenCV
+        # read frames straight off it.
+        print(f"Resolving stream for {args.video} ...")
+        src, _vid, title = VL.stream_url(args.video)
+        print(f"Streaming: {title}")
+    else:
+        src = args.video  # local file path
     cap = cv2.VideoCapture(src)
     if not cap.isOpened():
         raise SystemExit(f"Could not open video source: {args.video!r}")

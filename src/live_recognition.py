@@ -16,7 +16,12 @@ M1 Pro, see gallery.get_app).
     screen (a background/automation process can't display it). Controls: 'q' or ESC = quit,
     space = pause/resume.
 
+Run it with no arguments and it becomes an interactive tool: it asks for a source, plays it to
+the end, then asks whether you want another one. The model and the gallery are loaded once and
+reused for every video in the session (the load is the slow part, a few seconds).
+
 Usage:
+    python src/live_recognition.py                                  # interactive: asks each time
     python src/live_recognition.py --video data/videos/video_01.mp4
     python src/live_recognition.py --video 0                        # webcam
     python src/live_recognition.py --video "https://youtu.be/XXXX"  # YouTube (streamed, no download)
@@ -71,13 +76,164 @@ def annotate(frame, app, gallery, threshold, show_unknown) -> int:
     return hits
 
 
+def open_capture(spec: str):
+    """Open one source (file path, camera index ('0'), or link) as a cv2.VideoCapture.
+
+    Raises ValueError if it can't be opened, so the interactive loop can just ask again.
+    """
+    if spec.isdigit():
+        src: int | str = int(spec)  # webcam index
+    elif re.match(r"^(https?://|www\.)", spec):
+        # A YouTube (or other) link: resolve it to a directly-readable media URL without
+        # downloading anything (same path the app's Live+learn page uses), then let OpenCV
+        # read frames straight off it.
+        print(f"Resolving stream for {spec} ...")
+        src, _vid, title = VL.stream_url(spec)
+        print(f"Streaming: {title}")
+    else:
+        src = str(Path(spec).expanduser())  # local file path
+    cap = cv2.VideoCapture(src)
+    if not cap.isOpened():
+        cap.release()
+        raise ValueError(f"Could not open video source: {spec!r}")
+    return cap
+
+
+def watch(cap, app, gallery, *, threshold, show_unknown, record, headless, limit) -> None:
+    """Play one source to the end (or until 'q'), drawing recognitions on every frame."""
+    fps_in = cap.get(cv2.CAP_PROP_FPS) or 30.0
+    w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+
+    writer = None
+    if record:
+        Path(record).parent.mkdir(parents=True, exist_ok=True)
+        writer = cv2.VideoWriter(record, cv2.VideoWriter_fourcc(*"mp4v"), fps_in, (w, h))
+
+    win = "recognition  (q/ESC = quit, space = pause)"
+    if not headless:
+        print("Live window opening, focus it, then press 'q' or ESC to quit, space to pause.")
+
+    idx = 0
+    fps = 0.0
+    t_last = time.perf_counter()
+    paused = False
+    while True:
+        if not paused:
+            ok, frame = cap.read()
+            if not ok:
+                break
+            annotate(frame, app, gallery, threshold, show_unknown)
+            now = time.perf_counter()
+            dt = now - t_last
+            t_last = now
+            fps = (0.9 * fps + 0.1 / dt) if dt > 0 else fps  # smoothed processing fps
+            cv2.putText(
+                frame,
+                f"{fps:4.1f} fps",
+                (8, h - 12),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.6,
+                (255, 255, 255),
+                2,
+            )
+            if writer is not None:
+                writer.write(frame)
+            idx += 1
+
+        if headless:
+            if limit and idx >= limit:
+                break
+        else:
+            cv2.imshow(win, frame)
+            k = cv2.waitKey(1) & 0xFF
+            if k in (ord("q"), 27):
+                break
+            if k == ord(" "):
+                paused = not paused
+            if limit and idx >= limit:
+                break
+
+    cap.release()
+    if writer is not None:
+        writer.release()
+        print(f"Recorded -> {record}")
+    if not headless:
+        cv2.destroyAllWindows()
+    print(f"Done, processed {idx} frames (~{fps:.1f} fps).")
+
+
+def ask(text: str) -> str:
+    """One prompt. Ctrl-C / Ctrl-D read as 'quit' rather than a traceback."""
+    try:
+        return input(text).strip().strip("'\"")  # drag-dropped paths arrive quoted
+    except (EOFError, KeyboardInterrupt):
+        print()
+        return "q"
+
+
+def ask_source() -> str | None:
+    """Ask for one video source; returns a spec for open_capture(), or None to quit."""
+    while True:
+        print(
+            "\nSource?\n  1) YouTube link (streamed, nothing downloaded)\n  2) Video file"
+            "\n  3) Webcam\n  q) Quit"
+        )
+        choice = ask("> ").lower()
+        if choice in ("q", "quit", "4"):
+            return None
+        if choice == "1":
+            if url := ask("Link: "):
+                return url
+        elif choice == "2":
+            path = ask("Path: ")
+            if not path:
+                continue
+            if not Path(path).expanduser().exists():
+                print(f"No such file: {path}")
+                continue
+            return path
+        elif choice == "3":
+            return ask("Camera index [0]: ") or "0"
+        else:
+            print("Pick 1, 2, 3 or q.")
+
+
+def interactive(app, gallery, args) -> None:
+    """Ask -> play -> ask again, reusing the already-loaded model and gallery."""
+    while True:
+        spec = ask_source()
+        if spec is None:
+            break
+        record = ask("Save annotated mp4? path (blank = no): ") or None
+        if record in ("q", "quit"):  # a stray quit at the record prompt shouldn't start a video
+            break
+        try:
+            cap = open_capture(spec)
+        except ValueError as e:
+            print(e)
+            continue
+        watch(
+            cap,
+            app,
+            gallery,
+            threshold=args.threshold,
+            show_unknown=args.show_unknown,
+            record=record,
+            headless=False,
+            limit=args.limit,
+        )
+        if ask("\nAnother video? [Y/n] ").lower() in ("n", "no", "q", "quit"):
+            break
+    print("Bye.")
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument(
         "--video",
-        required=True,
         help="a video file path, a camera index like 0 for webcam, or a YouTube link "
-        "(streamed live, nothing is downloaded)",
+        "(streamed live, nothing is downloaded). Omit it to be asked interactively.",
     )
     ap.add_argument("--gallery", default="data/gallery.json")
     ap.add_argument(
@@ -99,80 +255,26 @@ def main() -> None:
     print(f"Loading gallery from {args.gallery} ...")
     gallery = G.embeddings_from(args.gallery)
 
-    if args.video.isdigit():
-        src = int(args.video)  # webcam index
-    elif re.match(r"^(https?://|www\.)", args.video):
-        # A YouTube (or other) link: resolve it to a directly-readable media URL without
-        # downloading anything (same path the app's Live+learn page uses), then let OpenCV
-        # read frames straight off it.
-        print(f"Resolving stream for {args.video} ...")
-        src, _vid, title = VL.stream_url(args.video)
-        print(f"Streaming: {title}")
-    else:
-        src = args.video  # local file path
-    cap = cv2.VideoCapture(src)
-    if not cap.isOpened():
-        raise SystemExit(f"Could not open video source: {args.video!r}")
-    fps_in = cap.get(cv2.CAP_PROP_FPS) or 30.0
-    w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-    h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-
-    writer = None
-    if args.record:
-        Path(args.record).parent.mkdir(parents=True, exist_ok=True)
-        writer = cv2.VideoWriter(args.record, cv2.VideoWriter_fourcc(*"mp4v"), fps_in, (w, h))
-
-    win = "recognition  (q/ESC = quit, space = pause)"
-    if not args.headless:
-        print("Live window opening, focus it, then press 'q' or ESC to quit, space to pause.")
-
-    idx = 0
-    fps = 0.0
-    t_last = time.perf_counter()
-    paused = False
-    while True:
-        if not paused:
-            ok, frame = cap.read()
-            if not ok:
-                break
-            annotate(frame, app, gallery, args.threshold, args.show_unknown)
-            now = time.perf_counter()
-            dt = now - t_last
-            t_last = now
-            fps = (0.9 * fps + 0.1 / dt) if dt > 0 else fps  # smoothed processing fps
-            cv2.putText(
-                frame,
-                f"{fps:4.1f} fps",
-                (8, h - 12),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.6,
-                (255, 255, 255),
-                2,
-            )
-            if writer is not None:
-                writer.write(frame)
-            idx += 1
-
+    if not args.video:
         if args.headless:
-            if args.limit and idx >= args.limit:
-                break
-        else:
-            cv2.imshow(win, frame)
-            k = cv2.waitKey(1) & 0xFF
-            if k in (ord("q"), 27):
-                break
-            if k == ord(" "):
-                paused = not paused
-            if args.limit and idx >= args.limit:
-                break
+            raise SystemExit("--headless needs --video (there is nobody to ask).")
+        interactive(app, gallery, args)
+        return
 
-    cap.release()
-    if writer is not None:
-        writer.release()
-        print(f"Recorded -> {args.record}")
-    if not args.headless:
-        cv2.destroyAllWindows()
-    print(f"Done, processed {idx} frames (~{fps:.1f} fps).")
+    try:
+        cap = open_capture(args.video)
+    except ValueError as e:
+        raise SystemExit(str(e)) from None
+    watch(
+        cap,
+        app,
+        gallery,
+        threshold=args.threshold,
+        show_unknown=args.show_unknown,
+        record=args.record,
+        headless=args.headless,
+        limit=args.limit,
+    )
 
 
 if __name__ == "__main__":

@@ -83,6 +83,14 @@ and ignores everyone else, no learning. The source can be a file, a webcam (`--v
 a YouTube link (streamed live, nothing downloaded):
 
 ```bash
+.venv/bin/python src/live_recognition.py          # interactive: asks for a source each time
+```
+
+It asks what to watch (link / file / webcam), plays it to the end, then asks whether you want
+another one, the model and gallery load once and are reused for the whole session. Pass
+`--video` to skip the questions and play a single source directly:
+
+```bash
 .venv/bin/python src/live_recognition.py --video data/videos/video_01.mp4
 .venv/bin/python src/live_recognition.py --video 0                        # webcam
 .venv/bin/python src/live_recognition.py --video "https://youtu.be/XXXX"  # YouTube stream

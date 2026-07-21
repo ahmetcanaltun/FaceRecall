@@ -1,7 +1,9 @@
 """
 "Add a person" helper: given a name, fetch candidate face photos from Wikimedia, the
 Wikipedia lead portrait + Commons file-search hits, so the reviewer can pick one or two
-good faces and enroll them, instead of hunting the web and copying files by hand.
+good faces and enroll them, instead of hunting the web and copying files by hand. The same
+candidate records can also be built from photos the user uploads themselves
+(`face_candidates_from_uploads`), for people Commons has no usable portrait of.
 
 Why Wikimedia and not a generic web image search: this project avoids
 watermarked stock (Getty/AFP) and prefers official / rights-clear sources. Wikimedia
@@ -132,21 +134,32 @@ def _download(url: str, dest: Path) -> Path | None:
         return None
 
 
+def face_crops(app, img: np.ndarray, *, all_faces: bool = False) -> list[tuple[np.ndarray, float]]:
+    """Detect faces and return [(padded_crop, det_score), ...], most confident first.
+    Skips signatures/logos/landscapes (no face) and low-confidence detections. With
+    `all_faces` every usable face is returned (an uploaded group photo offers one candidate
+    per person); otherwise only the most confident one (the Wikimedia flow's behaviour, a
+    search hit is assumed to be a portrait of the person searched for)."""
+    faces = sorted(app.get(img), key=lambda d: -d.det_score)
+    if not all_faces:
+        faces = faces[:1]
+    out = []
+    for face in faces:
+        if float(face.det_score) < MIN_DET_SCORE:
+            continue
+        x1, y1, x2, y2 = map(int, face.bbox)
+        pw, ph = int((x2 - x1) * CROP_PAD), int((y2 - y1) * CROP_PAD)
+        h, w = img.shape[:2]
+        x1, y1 = max(0, x1 - pw), max(0, y1 - ph)
+        x2, y2 = min(w, x2 + pw), min(h, y2 + ph)
+        out.append((img[y1:y2, x1:x2].copy(), float(face.det_score)))
+    return out
+
+
 def _face_crop(app, img: np.ndarray) -> tuple[np.ndarray, float] | None:
-    """Detect the most confident face and return (padded_crop, det_score), or None if no
-    usable face. Skips signatures/logos/landscapes (no face) and low-confidence detections."""
-    faces = app.get(img)
-    if not faces:
-        return None
-    face = max(faces, key=lambda d: d.det_score)
-    if float(face.det_score) < MIN_DET_SCORE:
-        return None
-    x1, y1, x2, y2 = map(int, face.bbox)
-    pw, ph = int((x2 - x1) * CROP_PAD), int((y2 - y1) * CROP_PAD)
-    h, w = img.shape[:2]
-    x1, y1 = max(0, x1 - pw), max(0, y1 - ph)
-    x2, y2 = min(w, x2 + pw), min(h, y2 + ph)
-    return img[y1:y2, x1:x2].copy(), float(face.det_score)
+    """The single most confident usable face, or None. Thin wrapper over `face_crops`."""
+    got = face_crops(app, img)
+    return got[0] if got else None
 
 
 def fetch_face_candidates(app, name: str, *, limit: int = 12) -> list[dict]:
@@ -180,4 +193,40 @@ def fetch_face_candidates(app, name: str, *, limit: int = 12) -> list[dict]:
                 "title": cand["title"],
             }
         )
+    return results
+
+
+def face_candidates_from_uploads(app, name: str, uploads: list[tuple[str, bytes]]) -> list[dict]:
+    """Same candidate records as `fetch_face_candidates`, but from photos the user supplies
+    instead of a Wikimedia search, for people Commons has no usable portrait of (or when the
+    user simply has a better photo). Every usable face in each upload becomes its own
+    candidate, so a group photo can be used: the reviewer ticks the right person.
+
+    `uploads` is [(filename, raw bytes), ...]. Crops are cached under the same
+    results/wiki_cache/<slug>/ directory and enrolled through the identical path, so the two
+    sources are indistinguishable downstream. `license` records that the user supplied the
+    file, the licensing responsibility is theirs (see the module docstring on sourcing)."""
+    slug = urllib.parse.quote(name, safe="")
+    cache = CACHE_ROOT / slug
+    cache.mkdir(parents=True, exist_ok=True)
+    results: list[dict] = []
+    for i, (filename, data) in enumerate(uploads):
+        img = cv2.imdecode(np.frombuffer(data, np.uint8), cv2.IMREAD_COLOR)
+        if img is None:
+            log.warning("unreadable upload: %s", filename)
+            continue
+        crops = face_crops(app, img, all_faces=True)
+        for j, (crop, det) in enumerate(crops):
+            crop_path = cache / f"upload_{i:02d}_{j:02d}.jpg"
+            cv2.imwrite(str(crop_path), crop)
+            nth = f" (face {j + 1}/{len(crops)})" if len(crops) > 1 else ""
+            results.append(
+                {
+                    "crop_path": str(crop_path),
+                    "det_score": round(det, 3),
+                    "license": "uploaded by you",
+                    "source_url": None,
+                    "title": f"{filename}{nth}",
+                }
+            )
     return results

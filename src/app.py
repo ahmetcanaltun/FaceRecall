@@ -14,8 +14,8 @@ Pages (grouped in the sidebar):
     Videos / Live + learn one continuous flow: paste a link -> it streams live (no download) with
                           recognition boxes -> press Stop -> it names whatever it didn't recognize
                           (the same collect/finalize path + review cards as Recognize, driven live).
-    People / Add person   type a name -> candidate faces from Wikimedia (wiki_faces) -> pick
-                          1-2 -> enrolled (same guarded path). No manual photo hunting.
+    People / Add person   type a name -> candidate faces from Wikimedia (wiki_faces) OR from
+                          photos you upload -> pick 1-2 -> enrolled (same guarded path).
     People / Gallery      browse enrolled people (summary metrics + per-person cards) and
                           rename / delete / merge / drop a bad reference photo.
 
@@ -97,7 +97,8 @@ def run_scan(video_path, gallery_path, threshold, cluster_sim, interval):
 def _enroll_wiki_pick(
     cand, name, gallery_path, photos_root, threshold, override
 ) -> tuple[int, str | None]:
-    """Enroll one Wikimedia crop as `name` through the single gallery.enroll() path (via
+    """Enroll one candidate crop (Wikimedia or upload) as `name` through the single
+    gallery.enroll() path (via
     review_unknowns.enroll_crop), guarding against mislabels:
     if the face is >= threshold-close to a different already-enrolled person it's refused
     until the reviewer overrides. Returns (embeddings_added, warning_or_None)."""
@@ -120,19 +121,44 @@ def _enroll_wiki_pick(
     return added, None
 
 
+def _set_candidates(cands, name_raw):
+    """Install a fresh candidate grid (from either source) and drop the previous grid's
+    tick state, whose keys would otherwise select the wrong cards."""
+    st.session_state["wiki_cands"] = cands
+    st.session_state["wiki_name"] = name_raw
+    for k in list(st.session_state):
+        if k.startswith("wpick_"):
+            st.session_state.pop(k)
+
+
 def render_add_person(gallery_path, photos_root, threshold):
-    """The 'Add person' page: type a name -> fetch candidate face photos from Wikimedia
-    (rights-clear, official API, see wiki_faces) -> pick the ones that are really that person
-    -> enroll them. No manual downloading/copying of reference photos."""
-    st.subheader("Add a new person from Wikimedia")
+    """The 'Add person' page: type a name -> get candidate face photos, either from Wikimedia
+    (rights-clear, official API, see wiki_faces) or from files the user uploads -> pick the
+    ones that are really that person -> enroll them. Both sources produce the same candidate
+    records and enroll through the same guarded path, so only the sourcing differs."""
+    st.subheader("Add a new person")
     name_raw = st.text_input("Person's name", placeholder="e.g. İlkay Işık", key="wiki_name_in")
-    if st.button("Search Wikimedia", disabled=not name_raw):
-        with st.spinner(f"Searching Wikimedia for '{name_raw}'..."):
-            st.session_state["wiki_cands"] = W.fetch_face_candidates(get_app(), name_raw)
-        st.session_state["wiki_name"] = name_raw
-        for k in list(st.session_state):  # clear stale pick checkboxes from a previous search
-            if k.startswith("wpick_"):
-                st.session_state.pop(k)
+
+    wiki_col, up_col = st.columns(2)
+    with wiki_col:
+        if st.button("Search Wikimedia", disabled=not name_raw):
+            with st.spinner(f"Searching Wikimedia for '{name_raw}'..."):
+                _set_candidates(W.fetch_face_candidates(get_app(), name_raw), name_raw)
+    with up_col:
+        files = st.file_uploader(
+            "...or upload photos",
+            type=[e[1:] for e in G.IMAGE_EXTS],
+            accept_multiple_files=True,
+            key="up_photos",
+        )
+        if st.button("Use uploaded photos", disabled=not (name_raw and files)):
+            with st.spinner(f"Detecting faces in {len(files)} photo(s)..."):
+                _set_candidates(
+                    W.face_candidates_from_uploads(
+                        get_app(), name_raw, [(f.name, f.getvalue()) for f in files]
+                    ),
+                    name_raw,
+                )
 
     cands = st.session_state.get("wiki_cands")
     name = st.session_state.get("wiki_name")
@@ -140,8 +166,9 @@ def render_add_person(gallery_path, photos_root, threshold):
         return
     if not cands:
         st.warning(
-            f"No usable face photos found on Wikimedia for '{name}'. Try the full "
-            "name as it appears on Wikipedia."
+            f"No usable face found for '{name}'. From Wikimedia: try the full name as it "
+            "appears on Wikipedia. From an upload: the face may be too small or too "
+            "low-confidence to enroll from."
         )
         return
 
@@ -155,7 +182,10 @@ def render_add_person(gallery_path, photos_root, threshold):
             st.image(c["crop_path"], width="stretch")
             st.checkbox("use this one", key=f"wpick_{i}")
             st.caption(f"{c['license']} · det {c['det_score']:.2f}")
-            st.markdown(f"[source]({c['source_url']})")
+            if c["source_url"]:  # uploads have no source page
+                st.markdown(f"[source]({c['source_url']})")
+            else:
+                st.caption(c["title"])
 
     override = st.checkbox("Add anyway (override the contamination warnings)", key="wiki_override")
     if st.button(f"Add selected as {R.pretty(norm)}", type="primary", disabled=not norm):
@@ -713,7 +743,7 @@ def page_live_learn() -> None:
 
 
 def page_add() -> None:
-    """Add a new person from Wikimedia."""
+    """Add a new person from Wikimedia or from your own photos."""
     gallery_path, _i, threshold, _c = _settings()
     render_add_person(gallery_path, PHOTOS_ROOT, threshold)
 

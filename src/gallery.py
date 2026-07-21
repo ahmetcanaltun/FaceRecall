@@ -4,10 +4,10 @@ The dependency-free core: InsightFace model + persistent enrolled gallery + matc
 Rather than re-embedding every reference photo on each run, people are enrolled once into a
 single human-readable JSON file (`data/gallery.json`), storing multiple embeddings per person
 plus per-embedding metadata (source photo, detection score, face size, quality flags,
-enrollment date), the raw material for threshold calibration and contamination checks
-(see `experiments/threshold_calibration.py` and `experiments/holdout_evaluation.py`).
+enrollment date), the raw material for the threshold calibration and contamination checks
+reported in the project report.
 
-Storage format (user-chosen: single JSON file):
+Storage format:
 
     {
       "meta":   {"backend": "insightface/buffalo_l", "dim": 512, "updated": "..."},
@@ -21,16 +21,14 @@ Storage format (user-chosen: single JSON file):
       }
     }
 
-Quality gates (from face-recognition-system-builder's enrollment decision tree) are applied
-as *flags*, not hard rejects, data is scarce here (sometimes 1 photo/person), so we document
-weak enrollments per person rather than silently dropping them. The only hard skip is a photo
-where no face is detected at all.
+Quality gates are applied as *flags*, not hard rejects, data is scarce here (sometimes
+1 photo/person), so weak enrollments are documented rather than silently dropped. The only
+hard skip is a photo with no detectable face.
 
-`enroll()` is the single "add a person" path, the app's labeling / Wikimedia flows all call
-it; there is not a second enrollment code path.
+`enroll()` is the single "add a person" path; there is no second one.
 
-Library module: run everything through the app (`streamlit run src/app.py`). To rebuild the
-gallery from data/reference_photos/ (rare maintenance), see the one-liner in the README.
+Library module: run everything through the app (`streamlit run src/app.py`). Rebuilding the
+gallery from data/reference_photos/ is a README one-liner.
 """
 
 from __future__ import annotations
@@ -49,10 +47,9 @@ EMB_DIM = 512
 DEFAULT_GALLERY = "data/gallery.json"
 DEFAULT_PHOTOS = "data/reference_photos"
 
-# Calibrated cosine-similarity cutoff for "same person" on buffalo_l embeddings (backend-
-# specific, revisit if the backend ever changes). Photo pairs separate cleanly around it and
-# on video it sits at the bottom edge of the genuine cluster; see
-# experiments/threshold_calibration.py and results/threshold_calibration.json.
+# Calibrated cosine cutoff for "same person" on buffalo_l embeddings, backend-specific,
+# revisit if the backend changes. Photo pairs separate cleanly around it; on video it sits at
+# the bottom edge of the genuine cluster. Calibration is in the project report.
 DEFAULT_THRESHOLD = 0.40
 
 # Enrollment quality gates, recorded as flags, not hard rejects (scarce data).
@@ -60,12 +57,10 @@ MIN_CONFIDENCE = 0.7  # det_score below this -> "low_confidence"
 MIN_FACE_PX = 80  # min(w,h) below this -> "small_face"
 MAX_FACE_FRACTION = 0.5  # face wider/taller than this share of the image -> "large_face"
 
-# A reference photo is an image someone handed us as "this contains the face",
-# so unlike the video scan (det_thresh 0.5, tuned for noisy frames) we retry a failed
-# detection once at this lower threshold before giving up. Rescued 39/47 previously
-# un-enrollable video crops on the 2026-07-16 scan; the record gets a "weak_detection" flag
-# (and, for video crops, review_unknowns.preflight's >=0.6 consistency check still guards
-# against latching onto the wrong face).
+# A reference photo was handed to us as "this contains the face", so unlike the
+# video scan (det_thresh 0.5, tuned for noisy frames) a failed detection is retried once at
+# this lower threshold. The record then gets a "weak_detection" flag; for video crops,
+# review_unknowns.preflight's >=0.6 consistency check still guards against the wrong face.
 RETRY_DET_THRESH = 0.2
 
 

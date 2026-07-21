@@ -3,23 +3,18 @@ The video scan: make a pass over a video and group every face into per-person cl
 deciding recognized/unknown per cluster, the unknowns are then labeled by a human in the
 review UI (`review_unknowns.py`, driven by the app).
 
-Every detected face is matched against the enrolled gallery using the calibrated 0.40
-threshold. The recognized/unknown decision is made per cluster with the adopted **3-of-5
-temporal rule** (>=3 of some 5 consecutive observations >= threshold), not per frame, a
-single hot/cold frame can no longer flip the decision (see
-`experiments/temporal_aggregation.py` for the rule sweep that chose it). Clusters that fail
-the rule are the "unknowns" this project's goal is about ("when it sees a face it doesn't
-know, ask who it is"); note a person seen for fewer than 3 sampled observations (~1.2 s) can
-never be auto-recognized and will surface as unknown.
+Every detected face is matched against the enrolled gallery at the calibrated 0.40 threshold.
+The recognized/unknown decision is made per cluster with the **3-of-5 temporal rule** (>=3 of
+some 5 consecutive observations >= threshold), not per frame, so a single hot/cold frame can't
+flip it, the rule was picked from a 16-rule sweep, reported in the project report. A person
+seen for fewer than 3 sampled observations (~1.2 s) therefore can never be auto-recognized and
+surfaces as unknown.
 
-The same stranger appears across many consecutive frames, so we don't want to ask "who is
-this?" dozens of times for one person. Sub-threshold detections are therefore **greedily
-clustered by embedding similarity** (one representative crop per apparent person), so the
-reviewer sees one card per stranger, not one per frame. The clustering cutoff
-(`cluster_sim`, default 0.5) is a heuristic for "same face across frames of one clip",
-higher than the 0.40 recognition threshold because same-clip same-person frames share
-lighting/camera and sit well above cross-domain gallery matches. Flagged for confirmation,
-not a calibrated value.
+One stranger spans many consecutive frames, so detections are **greedily clustered by
+embedding similarity** (one representative crop per apparent person) and the reviewer sees one
+card per stranger, not one per frame. The clustering cutoff (`cluster_sim`, default 0.5) is a
+heuristic, not a calibrated value: it is higher than the 0.40 recognition threshold because
+same-clip frames of one person share lighting/camera and sit well above cross-domain matches.
 
 Output (handoff to the review cards):
     results/unknowns/<video_id>/
@@ -224,11 +219,9 @@ def collect(
     return clusters, {"sampled": sampled, "detections": n_det, **stats}
 
 
-# Adopted decision rule (chosen from a 16-rule sweep, experiments/temporal_aggregation.py,
-# user sign-off 2026-07-13): a cluster is recognized iff >=K of some N consecutive
-# observations score >= threshold.
-# At the ~0.4 s sampling interval that is a ~2 s window and requires ~1.2 s of presence,
-# a single hot frame can no longer flip the decision in either direction.
+# The adopted decision rule: a cluster is recognized iff >=K of some N consecutive observations
+# score >= threshold. At the ~0.4 s sampling interval that is a ~2 s window needing ~1.2 s of
+# presence, so a single hot frame can't flip the decision either way.
 TEMPORAL_K, TEMPORAL_N = 3, 5
 
 

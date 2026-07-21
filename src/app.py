@@ -147,11 +147,20 @@ def render_add_person(gallery_path, photos_root, threshold):
     with up_col:
         files = st.file_uploader(
             "...or upload photos",
-            type=[e[1:] for e in G.IMAGE_EXTS],
+            type=sorted(e[1:] for e in G.IMAGE_EXTS),
             accept_multiple_files=True,
             key="up_photos",
         )
-        if st.button("Use uploaded photos", disabled=not (name_raw and files)):
+        # No "use these" button on purpose: picking files already reruns the page, so the
+        # upload is processed as soon as a name and files are both present (the same
+        # button-free idiom as pasting a link on the Recognize page). `sig` makes that
+        # idempotent across the many reruns a Streamlit page does, the detection pass runs
+        # once per (name, file set), not on every tick.
+        sig = (R.norm_name(name_raw), tuple((f.name, f.size) for f in files or []))
+        if files and not name_raw:
+            st.caption("Type the person's name above to use these.")
+        elif files and st.session_state.get("up_sig") != sig:
+            st.session_state["up_sig"] = sig
             with st.spinner(f"Detecting faces in {len(files)} photo(s)..."):
                 _set_candidates(
                     W.face_candidates_from_uploads(

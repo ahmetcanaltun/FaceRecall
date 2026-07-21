@@ -156,12 +156,6 @@ def face_crops(app, img: np.ndarray, *, all_faces: bool = False) -> list[tuple[n
     return out
 
 
-def _face_crop(app, img: np.ndarray) -> tuple[np.ndarray, float] | None:
-    """The single most confident usable face, or None. Thin wrapper over `face_crops`."""
-    got = face_crops(app, img)
-    return got[0] if got else None
-
-
 def fetch_face_candidates(app, name: str, *, limit: int = 12) -> list[dict]:
     """Search -> download -> detect. Returns one record per image that has a usable face:
     {crop_path, det_score, license, source_url, title}. crop_path is a padded face crop
@@ -178,10 +172,10 @@ def fetch_face_candidates(app, name: str, *, limit: int = 12) -> list[dict]:
         img = cv2.imread(str(raw))
         if img is None:
             continue
-        got = _face_crop(app, img)
-        if got is None:
+        got = face_crops(app, img)  # a search hit is assumed to be a portrait: best face only
+        if not got:
             continue
-        crop, det = got
+        crop, det = got[0]
         crop_path = cache / f"face_{i:02d}.jpg"
         cv2.imwrite(str(crop_path), crop)
         results.append(

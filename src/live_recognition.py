@@ -141,18 +141,15 @@ def watch(cap, app, gallery, *, threshold, show_unknown, record, headless, limit
                 writer.write(frame)
             idx += 1
 
-        if headless:
-            if limit and idx >= limit:
-                break
-        else:
+        if not headless:
             cv2.imshow(win, frame)
             k = cv2.waitKey(1) & 0xFF
             if k in (ord("q"), 27):
                 break
             if k == ord(" "):
                 paused = not paused
-            if limit and idx >= limit:
-                break
+        if limit and idx >= limit:
+            break
 
     cap.release()
     if writer is not None:

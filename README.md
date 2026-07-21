@@ -111,6 +111,7 @@ src/            the runtime system
   gallery.py         core: InsightFace model + JSON gallery + matching
   collect_unknowns.py video scan: detect/match/cluster + the 3-of-5 decision
   review_unknowns.py labeling cards + enrollment safeguards (contamination guard, audit log)
+  live_learn.py      the "Live + learn" streaming player page
   tracking.py        Kalman face tracking between sparse detections (norfair)
   live_recognition.py real-time cv2 window demo
   video_library.py   YouTube download / tidy naming / stream-URL resolution (yt-dlp)

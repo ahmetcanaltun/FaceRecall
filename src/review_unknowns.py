@@ -46,11 +46,6 @@ def norm_name(raw: str) -> str:
     return re.sub(r"[^a-z0-9]+", "_", s).strip("_")
 
 
-@st.cache_resource
-def _app():
-    return G.get_app()  # load InsightFace once for the whole session
-
-
 def load_manifest(path: str) -> dict:
     return json.loads(Path(path).read_text())
 
@@ -84,8 +79,7 @@ def preflight(
       * mismatch         -> the crop's main face isn't the one detected in the video
       * contamination    -> that face is >= threshold-close to a different enrolled person
     """
-    _app()  # warm shared detector/embedder
-    rec = G.embed_photo(crop_path)
+    rec = G.embed_photo(crop_path)  # loads the shared detector/embedder on first use
     if rec is None:
         return None, ["no face could be detected in this crop"]
     emb = np.asarray(rec["emb"], dtype=np.float32)
@@ -125,7 +119,6 @@ def enroll_crop(crop_path: Path, name: str, gallery_path: str, photos_root: str)
     shutil.copy(crop_path, dest)
 
     gallery = G.load(gallery_path) if Path(gallery_path).exists() else G.new_gallery()
-    _app()  # ensure the shared detector/embedder is warm before enroll() calls it
     added = G.enroll(gallery, name, [dest], verbose=False)
     if added == 0:
         dest.unlink(missing_ok=True)  # no face re-detected in the crop, don't leave a dead file
@@ -173,12 +166,13 @@ def name_picker(cid, people: list[str], default: str | None = None):
 
 
 def do_enroll(
-    c, mdir, manifest, manifest_path, gallery_path, photos_root, threshold, name, override, action
+    c, manifest, manifest_path, gallery_path, photos_root, threshold, name, override, action
 ) -> None:
     """Shared enroll/relabel action: run the preflight guard, enroll the crop through the
     single gallery.enroll() path, update the manifest + audit log, then rerun. `action` is
     'enroll' (an unknown face) or 'relabel' (correcting/reinforcing a recognized one)."""
     cid = c["id"]
+    mdir = Path(manifest_path).parent  # crops + decisions.jsonl sit beside the manifest
     # Never st.stop() here, do_enroll runs mid-render inside a card, and st.stop()
     # kills the rest of the page (every card below this one). Plain returns keep the page.
     if not name:
@@ -252,16 +246,12 @@ def render_manifest(manifest_path: str, gallery_path: str, photos_root: str) -> 
         with col_form:
             span = f"{c['n_frames']} frames · {c['first_t']:.1f}-{c['last_t']:.1f}s"
             near = f"nearest {short_name(c['match'])} {c['sim']:.2f}"
-            if "temporal_sim" in c:  # 3-of-5 manifests
-                rule = manifest.get("rule", "3of5")
-                tail = (
-                    "<3 samples"
-                    if c["temporal_sim"] is None
-                    else f"{rule} {c['temporal_sim']:.2f} < {threshold}"
-                )
-                st.caption(f"{span} · {near} · {tail}")
-            else:  # pre-rule manifest: sim is the representative frame's cosine
-                st.caption(f"{span} · {near} < {threshold}")
+            tail = (
+                "<3 samples"
+                if c["temporal_sim"] is None
+                else f"{manifest['rule']} {c['temporal_sim']:.2f} < {threshold}"
+            )
+            st.caption(f"{span} · {near} · {tail}")
             name = name_picker(cid, people)
             override = st.checkbox(
                 "Enroll anyway (override the warnings below)", key=f"override_{cid}"
@@ -270,7 +260,6 @@ def render_manifest(manifest_path: str, gallery_path: str, photos_root: str) -> 
             if b_enroll.button("Enroll", key=f"enroll_{cid}", type="primary"):
                 do_enroll(
                     c,
-                    mdir,
                     manifest,
                     manifest_path,
                     gallery_path,
@@ -302,11 +291,7 @@ def render_manifest(manifest_path: str, gallery_path: str, photos_root: str) -> 
                     st.image(str(crop), width=200)
             with col_form:
                 tag = " · corrected" if relabeled else ""
-                score = (
-                    f"peak {c['sim']:.2f} · {manifest.get('rule', '3of5')} {c['temporal_sim']:.2f}"
-                    if c.get("temporal_sim") is not None
-                    else f"{c['sim']:.2f}"
-                )
+                score = f"peak {c['sim']:.2f} · {manifest['rule']} {c['temporal_sim']:.2f}"
                 st.markdown(f"**{pretty(current)}** · {score}{tag}")
                 st.caption(f"{c['n_frames']} frames · {c['first_t']:.1f}-{c['last_t']:.1f}s")
                 with st.expander("Fix / add to gallery"):
@@ -317,7 +302,6 @@ def render_manifest(manifest_path: str, gallery_path: str, photos_root: str) -> 
                     if st.button("Save to gallery", key=f"relabel_{cid}"):
                         do_enroll(
                             c,
-                            mdir,
                             manifest,
                             manifest_path,
                             gallery_path,

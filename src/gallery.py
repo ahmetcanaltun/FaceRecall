@@ -274,18 +274,14 @@ def load_embeddings(path: str) -> dict[str, np.ndarray]:
 
 
 def embeddings_from(path: str) -> dict[str, np.ndarray]:
-    """Convenience loader for the video/annotate scripts: if `path` is a saved gallery
-    .json, load it (fast, no re-embedding); if it's a directory of reference photos,
-    build the embeddings in memory on the fly (legacy path). Missing file -> clear error."""
-    p = Path(path)
-    if p.is_dir():
-        g = build_from_photos(str(p))
-        return {
-            person: np.asarray([r["emb"] for r in d["embeddings"]], dtype=np.float32)
-            for person, d in g["people"].items()
-            if d["embeddings"]
-        }
-    if not p.exists():
+    """`load_embeddings` with a friendly error when the gallery file isn't there, the form
+    the app and the video scripts want, since a missing gallery is a normal first-run state."""
+    if Path(path).is_dir():
+        raise SystemExit(
+            f"Gallery {path!r} is a directory, this wants the gallery JSON file. To build one "
+            f"from a folder of reference photos, see the README's gallery-rebuild one-liner."
+        )
+    if not Path(path).exists():
         raise SystemExit(
             f"Gallery {path!r} not found, enroll someone in the app "
             f"(People ▸ Add person), or rebuild it from reference photos "

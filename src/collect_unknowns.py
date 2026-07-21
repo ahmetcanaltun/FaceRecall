@@ -40,6 +40,8 @@ import numpy as np
 
 import gallery as G  # shared CoreML detector/embedder + gallery match
 
+DEFAULT_OUT_ROOT = "results/unknowns"  # where write_manifest files each video's crops+manifest
+
 MIN_DET_SCORE = 0.5  # same as the recognition demo: reject the noisiest detections
 MIN_FACE_PX = 24  # skip only very tiny faces; keep this low so the scan surfaces (nearly)
 # every face the live view shows, small ones get a `small_face` flag on
@@ -133,17 +135,31 @@ def process_frame(
     return faces
 
 
+def decide_cluster(obs: list[dict], known: dict, threshold: float) -> dict:
+    """The adopted per-cluster decision, in one place. `obs` is a cluster's observation list
+    ([{t, bbox, sims}, ...]); the cluster's `candidate` is the gallery person it scores highest
+    against at its best moment, and it is `recognized` iff that person's score series passes
+    the 3-of-5 temporal rule at `threshold`. Returns the four fields to store on the cluster.
+
+    Called by `finalize` (batch scan / Live+learn's Stop) and per tick by the live view, which
+    needs the same verdict mid-pass to label its boxes, one rule, one implementation."""
+    candidate = max(known, key=lambda p: max(o["sims"][p] for o in obs))
+    series = [o["sims"][candidate] for o in obs]
+    temporal_sim = temporal_score(series)
+    return {
+        "candidate": candidate,
+        "peak_sim": max(series),
+        "temporal_sim": temporal_sim,
+        "recognized": temporal_sim is not None and temporal_sim >= threshold,
+    }
+
+
 def finalize(clusters: list[dict], known: dict, threshold: float) -> dict:
-    """Apply the adopted per-cluster decision (candidate / peak / 3-of-5 temporal score ->
-    recognized) to already-clustered detections, sort unknowns-first, and return
-    {recognized, unknown}. Split out of `collect()` so a live pass (which builds `clusters`
-    incrementally via `process_frame`) can reach the same decision on Stop."""
-    for c in clusters:  # the adopted per-cluster decision (3-of-5 temporal rule)
-        cand = max(known, key=lambda p: max(o["sims"][p] for o in c["obs"]))
-        series = [o["sims"][cand] for o in c["obs"]]
-        c["candidate"], c["peak_sim"] = cand, max(series)
-        c["temporal_sim"] = temporal_score(series)
-        c["recognized"] = c["temporal_sim"] is not None and c["temporal_sim"] >= threshold
+    """Apply the per-cluster decision to already-clustered detections, sort unknowns-first, and
+    return {recognized, unknown}. Split out of `collect()` so a live pass (which builds
+    `clusters` incrementally via `process_frame`) can reach the same decision on Stop."""
+    for c in clusters:
+        c.update(decide_cluster(c["obs"], known, threshold))
     n_reco = sum(c["recognized"] for c in clusters)
     clusters.sort(key=lambda c: (c["recognized"], c["first_t"]))  # unknowns first
     return {"recognized": n_reco, "unknown": len(clusters) - n_reco}
@@ -262,7 +278,12 @@ def clear_ignored(out_dir) -> int:
 
 
 def write_manifest(
-    clusters: list[dict], video, *, threshold: float, cluster_sim: float, out_root: str
+    clusters: list[dict],
+    video,
+    *,
+    threshold: float,
+    cluster_sim: float,
+    out_root: str = DEFAULT_OUT_ROOT,
 ) -> Path:
     """Persist `collect()`'s output as results/unknowns/<video_id>/{manifest.json, crop_*.jpg},
     the handoff the review UI reads. Returns the manifest path."""
@@ -318,7 +339,7 @@ def write_manifest(
     return mpath
 
 
-def _assign(clusters, emb, sim, person, ts, quality, crop, cluster_sim, obs=None) -> None:
+def _assign(clusters, emb, sim, person, ts, quality, crop, cluster_sim, obs) -> None:
     """Greedy online clustering of one face detection into `clusters` (in place)."""
     best_i, best_s = -1, cluster_sim
     for i, c in enumerate(clusters):
@@ -326,24 +347,23 @@ def _assign(clusters, emb, sim, person, ts, quality, crop, cluster_sim, obs=None
         if s >= best_s:
             best_i, best_s = i, s
     if best_i < 0:
-        new = {
-            "rep_emb": emb,
-            "rep_sim": sim,
-            "rep_closest": person,
-            "rep_quality": quality,
-            "crop": crop,
-            "n": 1,
-            "first_t": ts,
-            "last_t": ts,
-        }
-        if obs is not None:
-            new["obs"] = [obs]
-        clusters.append(new)
+        clusters.append(
+            {
+                "rep_emb": emb,
+                "rep_sim": sim,
+                "rep_closest": person,
+                "rep_quality": quality,
+                "crop": crop,
+                "n": 1,
+                "first_t": ts,
+                "last_t": ts,
+                "obs": [obs],
+            }
+        )
         return
     c = clusters[best_i]
     c["n"] += 1
     c["first_t"], c["last_t"] = min(c["first_t"], ts), max(c["last_t"], ts)
-    if obs is not None:
-        c.setdefault("obs", []).append(obs)
+    c["obs"].append(obs)
     if quality > c["rep_quality"]:  # keep the highest-quality detection as the representative
         c.update(rep_emb=emb, rep_sim=sim, rep_closest=person, rep_quality=quality, crop=crop)

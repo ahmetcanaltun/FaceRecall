@@ -28,9 +28,9 @@ from pathlib import Path
 log = logging.getLogger(__name__)
 
 VIDEOS_DIR = "data/videos"
+UPLOAD_DIR = Path(VIDEOS_DIR) / "uploads"
 INDEX_NAME = "library.json"
 VIDEO_EXTS = {".mp4", ".mov", ".mkv", ".avi", ".webm"}
-_ID_RE = re.compile(r"[A-Za-z0-9_-]{11}")
 
 
 # ---------------------------------------------------------------------------
@@ -113,6 +113,18 @@ def library(dest_dir: str = VIDEOS_DIR) -> list[Path]:
     return sorted(
         (p for p in root.iterdir() if p.suffix.lower() in VIDEO_EXTS), key=lambda p: p.name.lower()
     )
+
+
+def save_upload(name: str, data) -> Path:
+    """Persist an uploaded video under data/videos/uploads/ (git-ignored) and return its path.
+    Skips the rewrite if a file of the same size is already there, the app's callers run this
+    on every Streamlit rerun. Takes a filename + bytes rather than an upload object so nothing
+    here depends on the UI layer."""
+    UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+    dest = UPLOAD_DIR / Path(name).name  # basename only: never let a filename escape the folder
+    if not dest.exists() or dest.stat().st_size != len(data):
+        dest.write_bytes(data)
+    return dest
 
 
 def title_for(path, dest_dir: str = VIDEOS_DIR) -> str:
@@ -306,42 +318,3 @@ def rename_to_people(path, people: list[str], dest_dir: str = VIDEOS_DIR) -> Pat
             dest_dir=dest_dir,
         )
     return dst
-
-
-def _fetch_title(vid: str) -> str | None:
-    try:
-        import yt_dlp
-
-        with yt_dlp.YoutubeDL({"quiet": True, "no_warnings": True, "skip_download": True}) as ydl:
-            return ydl.extract_info(f"https://www.youtube.com/watch?v={vid}", download=False).get(
-                "title"
-            )
-    except Exception:
-        log.warning("could not fetch the title for video id %s", vid, exc_info=True)
-        return None
-
-
-def reorganize(dest_dir: str = VIDEOS_DIR) -> list[tuple[str, str]]:
-    """Rename already-downloaded files that aren't indexed yet to `video_NN`, fetching each
-    one's title (when the filename carries a recoverable YouTube id) into the index. Returns
-    the (old_name, new_name) renames performed."""
-    root = Path(dest_dir)
-    indexed = {m["file"] for m in load_index(dest_dir).values()}
-    renames: list[tuple[str, str]] = []
-    for p in sorted(root.iterdir(), key=lambda p: p.name.lower()):
-        if p.suffix.lower() not in VIDEO_EXTS or p.name in indexed or p.stem.startswith("video_"):
-            continue
-        m = _ID_RE.search(p.stem.split("_")[-1]) or _ID_RE.search(p.stem)
-        if not m:
-            continue  # no recoverable id, leave it alone
-        vid = m.group(0)
-        title = _fetch_title(vid) or p.stem
-        new_name = sequential_name(dest_dir, p.suffix.lstrip("."))
-        new_path = root / new_name
-        if new_path != p and not new_path.exists():
-            p.rename(new_path)
-            renames.append((p.name, new_name))
-        _index_put(
-            vid, file=new_name, title=title, url=f"https://youtu.be/{vid}", dest_dir=dest_dir
-        )
-    return renames

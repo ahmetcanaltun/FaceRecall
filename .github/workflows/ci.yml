@@ -20,5 +20,5 @@ jobs:
 
       - name: Lint (ruff)
         run: |
-          ruff check src experiments
+          ruff check src
           ruff format --check src

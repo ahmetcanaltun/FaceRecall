@@ -35,6 +35,10 @@ video ──> SCRFD face detector ──> ArcFace embedder (512-d)          [Ins
 
 ## Results (research evidence)
 
+The one-off scripts that produced these numbers (`experiments/*.py`) and their raw JSON output
+are not part of this repository, they are included with the project report. They are named
+below so each figure can be traced to the run that produced it.
+
 Backend head-to-head (4 people / 26 reference photos, 88 genuine + 237 impostor pairs, CPU,
 `experiments/backend_comparison.py`):
 
@@ -116,21 +120,21 @@ src/            the runtime system
   live_recognition.py real-time cv2 window demo
   video_library.py   YouTube download / tidy naming / stream-URL resolution (yt-dlp)
   wiki_faces.py      Wikimedia Commons portrait fetch for "Add person"
-experiments/    the reproducibility trail behind every number above (one-off scripts)
 data/           reference photos, videos, gallery.json (git-ignored) (biometric data)
 results/        scan outputs, experiment JSONs (git-ignored)
 docs/           technology report (TR/EN) + pipeline figure
 ```
 
-`experiments/backend_comparison.py` needs the two alternative backends installed:
-`.venv/bin/pip install deepface facenet-pytorch` (kept out of the runtime env, they add
-~1.6 GB of TF/torch).
+The research scripts behind the Results section ship with the project report rather than with
+this repository. One of them, `backend_comparison.py`, also needs the two alternative backends
+installed to run: `.venv/bin/pip install deepface facenet-pytorch` (kept out of the runtime
+env, they add ~1.6 GB of TF/torch).
 
 ## Tooling
 
 ```bash
 .venv/bin/pip install ruff pre-commit
-.venv/bin/ruff check src experiments
+.venv/bin/ruff check src
 ```
 
 ## Data, privacy & licensing

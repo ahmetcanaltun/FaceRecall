@@ -5,9 +5,9 @@ Recognize known people in real, low-quality video from
 system sees a face it doesn't know, it asks who it is, enrolls the answer, and knows them on the
 very next pass.
 
-Built as a research project. The research findings, backend comparison,
-threshold calibration, held-out validation, the temporal decision rule, are the primary
-deliverable; the Streamlit app is the working prototype that ties them together.
+Built as a research project. The findings (backend comparison, threshold calibration,
+held-out validation, the temporal decision rule) are the primary deliverable; the Streamlit
+app is the working prototype that ties them together.
 
 ---
 

@@ -1,9 +1,8 @@
 # Face Recognition in Video
 
-Recognize known people in real, low-quality video from
-**very few reference photos** (often a single one), and **learn new people on the fly**: when the
-system sees a face it doesn't know, it asks who it is, enrolls the answer, and knows them on the
-very next pass.
+Recognize known people in real, low-quality video from **very few reference photos** (often a
+single one), and **learn new people on the fly**: when the system sees a face it doesn't know,
+it asks who it is, enrolls the answer, and knows them on the very next pass.
 
 Built as a research project. The findings (backend comparison, threshold calibration,
 held-out validation, the temporal decision rule) are the primary deliverable; the Streamlit
@@ -48,7 +47,7 @@ video ──▶ SCRFD detector ──▶ 5-point align ──▶ ArcFace embedde
                                                 │
                       3-of-5 temporal rule at the calibrated 0.40 threshold
                                                 │
-                  "recognized: silva (0.71)"  /  "unknown: who is this?"
+                   "recognized: silva (0.71)"  /  "unknown: who is this?"
 ```
 
 **Detection (SCRFD, `det_10g.onnx`).** Anchor points on feature maps at strides 8/16/32 each
@@ -216,14 +215,15 @@ Run twice; the second run reflects the current gallery.
 This says two different things, and the table alone misleads on both:
 
 **False accepts: the evidence got stronger.** FAR is 0.0 at 0.40 and stays 0.0 across the entire
-sweep from 0.24 upward, now over 896 impostor pairs including four foreign leaders added
+sweep from 0.24 upward, now over 896 impostor pairs including four public figures added
 specifically to stress it. The highest any impostor pair reached is 0.233. The system saying
 someone's name when it's somebody else remains unobserved.
 
 **False rejects: a real regression with a locatable cause.** 8 of 60 genuine pairs now fall
-below 0.40, and they are not spread evenly: 7 of the 8 are foreign leaders enrolled from small
-video-frame crops with 2-3 references each (they lose 3/3, 2/2, 1/5 and 1/3 of their references;
-one hard frame of the best-covered person). Everyone enrolled from clean portraits still passes at 100 %. This is a
+below 0.40, and they are not spread evenly: 7 of the 8 belong to four people enrolled from small
+video-frame crops with only 2-3 references each (they lose 3/3, 2/2, 1/5 and 1/3 of their
+references); the eighth is one hard frame of the best-covered person (1 of 15). Everyone
+enrolled from clean portraits still passes at 100 %. This is a
 **reference-quality** problem, not a threshold problem; the fix is pruning tiny reference crops,
 not moving the cutoff.
 
@@ -240,8 +240,8 @@ frame, so a 0.28 cutoff would admit them. The temporal rule is what actually res
 
 Four clips, one of them picked for having lots of strangers. Every borderline cluster scoring 0.30-0.40 was
 exported as a bounding-box contact sheet (37 cards) and checked by eye. **Every single
-near-miss was an already-enrolled person themselves at a hard angle.** Not one was a stranger creeping toward the
-threshold. Verified stranger ceiling: **0.309** per frame.
+near-miss was an already-enrolled person at a hard angle.** Not one was a stranger creeping
+toward the threshold. Verified stranger ceiling: **0.309** per frame.
 
 From the 16-rule sweep:
 

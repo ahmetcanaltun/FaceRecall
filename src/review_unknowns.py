@@ -148,8 +148,8 @@ def gallery_people(gallery_path: str) -> list[str]:
 def name_picker(cid, people: list[str], default: str | None = None):
     """A 'who is this?' control: pick an existing gallery person, or add a new one. Returns
     the chosen person key (snake_case), or '' if 'new person' is chosen with an empty box.
-    Picking an existing person is how a missed face (e.g. a frame of someone already enrolled) gets
-    added to that person's gallery entry instead of created as a duplicate identity."""
+    Picking an existing person is how a missed face (e.g. a frame of someone already enrolled)
+    gets added to that person's gallery entry instead of created as a duplicate identity."""
     options = [NEW_PERSON] + people
     index = options.index(default) if default in options else 0
     choice = st.selectbox(

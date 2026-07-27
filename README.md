@@ -29,9 +29,10 @@ video ──> SCRFD face detector ──> ArcFace embedder (512-d)          [Ins
 - **Decisions are per apparent person, not per frame:** a cluster (or live track) is
   recognized iff >=3 of some 5 consecutive sampled observations reach the 0.40 cosine
   threshold, a single hot/cold frame can't flip the outcome.
-- **Live overlay at video rate** (the standalone window): detection runs every ~0.4 s and a
-  Kalman tracker (norfair) carries the boxes through the frames in between (`src/tracking.py`,
-  used by `src/live_recognition.py`).
+- **Live overlay** (the standalone window, `src/live_recognition.py`): every frame is detected
+  and matched, and only recognized people get a box. A Kalman tracker between sparse detections
+  was tried and dropped, on real news footage (camera motion, cuts) the predicted boxes drifted
+  and the temporal rule's label lag read as a bug.
 
 ## Results (research evidence)
 
@@ -116,7 +117,6 @@ src/            the runtime system
   collect_unknowns.py video scan: detect/match/cluster + the 3-of-5 decision
   review_unknowns.py labeling cards + enrollment safeguards (contamination guard, audit log)
   live_learn.py      the "Live + learn" streaming player page
-  tracking.py        Kalman face tracking between sparse detections (norfair)
   live_recognition.py real-time cv2 window demo
   video_library.py   YouTube download / tidy naming / stream-URL resolution (yt-dlp)
   wiki_faces.py      Wikimedia Commons portrait fetch for "Add person"

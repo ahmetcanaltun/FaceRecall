@@ -111,9 +111,9 @@ def _fragment(threshold, cluster_sim, interval, show_unknown, width):
     stream it finalises and reruns the whole app into review mode. `width` caps the on-screen
     frame size (px) so the player isn't full-page-wide.
 
-    one frame per tick: an in-tick playback loop (tried with the Kalman
-    tracker, 2026-07-14) fights the fragment timer, reruns overlap the loop and playback
-    stutters/jumps, so it was reverted. The tracked overlay lives in live_recognition.py."""
+    One frame per tick: an in-tick playback loop fights the fragment timer (reruns overlap
+    the loop and playback stutters/jumps). Smooth playback
+    is the standalone window's job (live_recognition.py)."""
     if not st.session_state.get("ll_playing"):
         last = st.session_state.get("ll_last_frame")
         if last is not None:  # keep the paused frame on screen instead of a blank gap

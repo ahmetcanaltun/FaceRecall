@@ -63,8 +63,8 @@ def _crop(frame: np.ndarray, bbox: tuple[int, int, int, int]) -> np.ndarray:
 
 def detect_matches(app, known: dict, frame: np.ndarray) -> list[dict]:
     """Detect + match every face in one frame (det-score / min-size filtered) without touching
-    any cluster state, the shared detection step for both the batch scan (`process_frame`)
-    and the tracked live overlay (`tracking.FaceTracker`). Each face is
+    any cluster state, the shared detection step for the batch scan (`process_frame`), the
+    live player and the standalone window. Each face is
     {bbox, person, sim, sims, emb, det_score, face_px}: `person`/`sim` the best gallery match,
     `sims` the full per-person cosine map (the temporal rule needs the whole series)."""
     faces: list[dict] = []

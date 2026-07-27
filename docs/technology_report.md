@@ -42,7 +42,6 @@ sistemin neresi kütüphane çağrısı, neresi proje katkısı sorusunun cevab�
 | Görüntü G/Ç | **OpenCV**, kare okuma, kırpma, çizim | hazır | `cv2` |
 | Arayüz | **Streamlit**, çok sayfalı web uygulaması | hazır | `streamlit` |
 | Video kaynağı | **yt-dlp**, YouTube bağlantısını doğrudan akış URL'sine çözer (indirme yok) | hazır | `yt-dlp` |
-| İzleme (araştırma izi) | **norfair**, Kalman filtresiyle seyrek tespitler arası kutu taşıma | hazır | `norfair` (§8; **çalışan sistemde kullanılmıyor**) |
 | **Eşleştirme ve karar katmanı** | kosinüs benzerliği, kişi-başına en-yakın-referans, 0.40 eşiği, açgözlü çevrimiçi kümeleme, 3-of-5 zamansal kural, kayıt (enrollment) korumaları ve denetim kaydı | **bu projede yazıldı** | `src/gallery.py`, `src/collect_unknowns.py`, `src/review_unknowns.py` |
 | **Uygulama ve akışlar** | çok sayfalı arayüz, canlı pencere, video kütüphanesi, Wikimedia/yükleme ile kişi ekleme | **bu projede yazıldı** | `src/app.py`, `src/live_recognition.py`, `src/video_library.py`, `src/wiki_faces.py` |
 | **Deneyler / kanıt üretimi** | arka uç karşılaştırması, eşik kalibrasyonu, held-out doğrulama, video yanlış-kabul taraması, zamansal kural süpürmesi | **bu projede yazıldı** | `experiments/*.py` -> `results/*.json` |
@@ -214,7 +213,6 @@ contribution.
 | Image I/O | **OpenCV**, frame reading, cropping, drawing | off the shelf | `cv2` |
 | UI | **Streamlit**, multi-page web app | off the shelf | `streamlit` |
 | Video source | **yt-dlp**, resolves a YouTube link to a direct stream URL (no download) | off the shelf | `yt-dlp` |
-| Tracking (research trail) | **norfair**, Kalman box carrying between sparse detections | off the shelf | `norfair` (§8; **not used in the running system**) |
 | **Matching & decision layer** | cosine similarity, per-person nearest reference, the 0.40 threshold, greedy online clustering, the 3-of-5 temporal rule, enrollment guards and the audit log | **written for this project** | `src/gallery.py`, `src/collect_unknowns.py`, `src/review_unknowns.py` |
 | **Application & flows** | multi-page UI, live window, video library, add-person via Wikimedia/uploads | **written for this project** | `src/app.py`, `src/live_recognition.py`, `src/video_library.py`, `src/wiki_faces.py` |
 | **Experiments / evidence** | backend comparison, threshold calibration, held-out validation, video false-accept scan, temporal rule sweep | **written for this project** | `experiments/*.py` -> `results/*.json` |

@@ -14,11 +14,15 @@ jobs:
         with:
           python-version: "3.12"
 
+      # Pinned: an unpinned linter changes its default rule set between releases and
+      # breaks the build with no code change (ruff 0.16 did exactly that).
       - name: Install lint dependencies
         run: |
-          pip install ruff
+          pip install ruff==0.14.5
 
+      # Rules are spelled out here rather than read from a config file, so this job
+      # is self-contained and matches what the project lints with locally.
       - name: Lint (ruff)
         run: |
-          ruff check src
+          ruff check --select E,W,F,I,B,UP,SIM --ignore E501,SIM108 --line-length 100 src
           ruff format --check --line-length 100 src

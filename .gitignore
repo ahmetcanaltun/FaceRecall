@@ -1,7 +1,7 @@
 # Real biometric data (reference photos/videos of individuals) - never commit
 data/reference_photos/*
 data/videos/*
-data/gallery.json
+data/gallery*.json
 !data/reference_photos/.gitkeep
 !data/videos/.gitkeep
 

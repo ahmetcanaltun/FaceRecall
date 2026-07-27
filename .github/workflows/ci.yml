@@ -21,4 +21,4 @@ jobs:
       - name: Lint (ruff)
         run: |
           ruff check src
-          ruff format --check src
+          ruff format --check --line-length 100 src

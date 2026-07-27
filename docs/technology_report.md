@@ -28,13 +28,24 @@ paketidir. Kullanılan temel teknik ise **ArcFace** (derin metrik öğrenme) yö
 
 ### 2. Kullanılan Teknoloji
 
-| Katman | Bileşen | Bu projedeki dosya / model |
-| --- | --- | --- |
-| Kütüphane | **InsightFace** (açık kaynak yüz analiz kütüphanesi) | `insightface` (Python) |
-| Model paketi | **buffalo_l** | `~/.insightface/models/buffalo_l/` |
-| Yüz tespiti (detection) | **SCRFD-10GF** | `det_10g.onnx` (16 MB) |
-| Yüz tanıma / gömme (recognition) | **ResNet-50 + ArcFace**, WebFace600K ile eğitilmiş | `w600k_r50.onnx` (166 MB) |
-| Çalışma motoru (inference) | **ONNX Runtime** (bu projede CoreML, Apple GPU/ANE; macOS dışında CPU'ya düşer; CPU'ya göre ~4.7x hızlı, gömme eşdeğerliği ~0.9998 kosinüs) | `CoreMLExecutionProvider` -> `CPUExecutionProvider` |
+**Köken** sütunu, bileşenin hazır mı geldiğini yoksa bu projede mi yazıldığını gösterir,
+sistemin neresi kütüphane çağrısı, neresi proje katkısı sorusunun cevabıdır.
+
+| Katman | Bileşen | Köken | Bu projedeki dosya / model |
+| --- | --- | --- | --- |
+| Kütüphane | **InsightFace** (açık kaynak yüz analiz kütüphanesi) | hazır | `insightface` (Python) |
+| Model paketi | **buffalo_l** | önceden eğitilmiş | `~/.insightface/models/buffalo_l/` |
+| Yüz tespiti (detection) | **SCRFD-10GF** | önceden eğitilmiş | `det_10g.onnx` (16 MB) |
+| Yüz tanıma / gömme (recognition) | **ResNet-50 + ArcFace**, WebFace600K ile eğitilmiş | önceden eğitilmiş | `w600k_r50.onnx` (166 MB) |
+| Çalışma motoru (inference) | **ONNX Runtime** (bu projede CoreML, Apple GPU/ANE; macOS dışında CPU'ya düşer; CPU'ya göre ~4.7x hızlı, gömme eşdeğerliği ~0.9998 kosinüs) | hazır | `CoreMLExecutionProvider` -> `CPUExecutionProvider` |
+| Sayısal altyapı | **NumPy**, tüm vektör matematiği (L2 normalizasyon, iç çarpım, matris çarpımı) | hazır | `numpy` |
+| Görüntü G/Ç | **OpenCV**, kare okuma, kırpma, çizim | hazır | `cv2` |
+| Arayüz | **Streamlit**, çok sayfalı web uygulaması | hazır | `streamlit` |
+| Video kaynağı | **yt-dlp**, YouTube bağlantısını doğrudan akış URL'sine çözer (indirme yok) | hazır | `yt-dlp` |
+| İzleme (araştırma izi) | **norfair**, Kalman filtresiyle seyrek tespitler arası kutu taşıma | hazır | `norfair` (§8; **çalışan sistemde kullanılmıyor**) |
+| **Eşleştirme ve karar katmanı** | kosinüs benzerliği, kişi-başına en-yakın-referans, 0.40 eşiği, açgözlü çevrimiçi kümeleme, 3-of-5 zamansal kural, kayıt (enrollment) korumaları ve denetim kaydı | **bu projede yazıldı** | `src/gallery.py`, `src/collect_unknowns.py`, `src/review_unknowns.py` |
+| **Uygulama ve akışlar** | çok sayfalı arayüz, canlı pencere, video kütüphanesi, Wikimedia/yükleme ile kişi ekleme | **bu projede yazıldı** | `src/app.py`, `src/live_recognition.py`, `src/video_library.py`, `src/wiki_faces.py` |
+| **Deneyler / kanıt üretimi** | arka uç karşılaştırması, eşik kalibrasyonu, held-out doğrulama, video yanlış-kabul taraması, zamansal kural süpürmesi | **bu projede yazıldı** | `experiments/*.py` -> `results/*.json` |
 
 > **Önemli doğruluk notu:** `buffalo_l` paketinde yüz **tespiti** için kullanılan model
 > **SCRFD**'dir (`det_10g.onnx`), RetinaFace değil. RetinaFace, InsightFace'in bir başka
@@ -188,13 +199,25 @@ The technology that produces these vectors is the **InsightFace** library with i
 
 ### 2. Technology Used
 
-| Layer | Component | File / model in this project |
-| --- | --- | --- |
-| Library | **InsightFace** (open-source face analysis toolkit) | `insightface` (Python) |
-| Model pack | **buffalo_l** | `~/.insightface/models/buffalo_l/` |
-| Face detection | **SCRFD-10GF** | `det_10g.onnx` (16 MB) |
-| Face recognition / embedding | **ResNet-50 + ArcFace**, trained on WebFace600K | `w600k_r50.onnx` (166 MB) |
-| Inference engine | **ONNX Runtime** (CoreML, Apple GPU/ANE in this project; falls back to CPU off-macOS; ~4.7x faster than CPU with ~0.9998 cosine embedding parity) | `CoreMLExecutionProvider` -> `CPUExecutionProvider` |
+The **Origin** column says whether a component came off the shelf or was written for this
+project, i.e. which part of the system is a library call and which part is the project's own
+contribution.
+
+| Layer | Component | Origin | File / model in this project |
+| --- | --- | --- | --- |
+| Library | **InsightFace** (open-source face analysis toolkit) | off the shelf | `insightface` (Python) |
+| Model pack | **buffalo_l** | pretrained | `~/.insightface/models/buffalo_l/` |
+| Face detection | **SCRFD-10GF** | pretrained | `det_10g.onnx` (16 MB) |
+| Face recognition / embedding | **ResNet-50 + ArcFace**, trained on WebFace600K | pretrained | `w600k_r50.onnx` (166 MB) |
+| Inference engine | **ONNX Runtime** (CoreML, Apple GPU/ANE in this project; falls back to CPU off-macOS; ~4.7x faster than CPU with ~0.9998 cosine embedding parity) | off the shelf | `CoreMLExecutionProvider` -> `CPUExecutionProvider` |
+| Numerics | **NumPy**, all vector math (L2 normalisation, dot product, matrix multiply) | off the shelf | `numpy` |
+| Image I/O | **OpenCV**, frame reading, cropping, drawing | off the shelf | `cv2` |
+| UI | **Streamlit**, multi-page web app | off the shelf | `streamlit` |
+| Video source | **yt-dlp**, resolves a YouTube link to a direct stream URL (no download) | off the shelf | `yt-dlp` |
+| Tracking (research trail) | **norfair**, Kalman box carrying between sparse detections | off the shelf | `norfair` (§8; **not used in the running system**) |
+| **Matching & decision layer** | cosine similarity, per-person nearest reference, the 0.40 threshold, greedy online clustering, the 3-of-5 temporal rule, enrollment guards and the audit log | **written for this project** | `src/gallery.py`, `src/collect_unknowns.py`, `src/review_unknowns.py` |
+| **Application & flows** | multi-page UI, live window, video library, add-person via Wikimedia/uploads | **written for this project** | `src/app.py`, `src/live_recognition.py`, `src/video_library.py`, `src/wiki_faces.py` |
+| **Experiments / evidence** | backend comparison, threshold calibration, held-out validation, video false-accept scan, temporal rule sweep | **written for this project** | `experiments/*.py` -> `results/*.json` |
 
 > **Accuracy note:** In the `buffalo_l` pack the face **detector** is **SCRFD**
 > (`det_10g.onnx`), *not* RetinaFace. RetinaFace is a sibling InsightFace detector but is not
